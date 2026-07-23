@@ -1,7 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+
+import {
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioPlayerStatus,
+} from 'expo-audio';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ViewToken } from 'react-native';
 import {
   Alert,
@@ -16,7 +22,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
+const TEST_BEAT = require('../../assets/audio/test-beat.wav');
 type FeedTab = 'forYou' | 'following';
 type SortMode = 'Recommended' | 'Trending' | 'Recent';
 
@@ -240,6 +246,33 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
   const [following, setFollowing] = useState(beat.followed);
   const [paused, setPaused] = useState(false);
   const [userRating, setUserRating] = useState(0);
+  const player = useAudioPlayer(TEST_BEAT, {
+  updateInterval: 100,
+});
+
+const audioStatus = useAudioPlayerStatus(player);
+const progress =
+  audioStatus.duration > 0
+    ? Math.min(audioStatus.currentTime / audioStatus.duration, 1)
+    : 0;
+
+const progressWidth = `${progress * 100}%` as `${number}%`;
+
+useEffect(() => {
+  player.loop = true;
+}, [player]);
+
+useEffect(() => {
+  if (active && !paused) {
+    player.play();
+  } else {
+    player.pause();
+  }
+
+  if (!active) {
+    void player.seekTo(0);
+  }
+}, [active, paused, player]);
 
   const displayedAverage =
     userRating === 0
@@ -392,7 +425,14 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
           </View>
 
           <View style={styles.progressTrack}>
-            <View style={styles.progressFill} />
+            <View
+  style={[
+    styles.progressFill,
+    {
+      width: progressWidth,
+    },
+  ]}
+/>
           </View>
         </View>
 
@@ -520,6 +560,15 @@ function FilterSheet({
 }
 
 export default function HomeScreen() {
+  
+
+useEffect(() => {
+  void setAudioModeAsync({
+    playsInSilentMode: true,
+    interruptionMode: 'doNotMix',
+    shouldRouteThroughEarpiece: false,
+  });
+}, []);
   const insets = useSafeAreaInsets();
 
   const [feedHeight, setFeedHeight] = useState(0);
@@ -576,6 +625,7 @@ export default function HomeScreen() {
       onLayout={(event) => setFeedHeight(event.nativeEvent.layout.height)}
       style={styles.screen}
     >
+      
       <StatusBar style="light" />
 
       {feedHeight > 0 && (
@@ -923,7 +973,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.26)',
   },
   progressFill: {
-    width: '36%',
     height: '100%',
     backgroundColor: COLORS.green,
   },
