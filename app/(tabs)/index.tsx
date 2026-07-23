@@ -1,28 +1,39 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import {
+  BlurMask,
+  Canvas,
+  Group,
+  RoundedRect,
+} from '@shopify/react-native-skia';
+import {
+  requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioPlayer,
   useAudioPlayerStatus,
+  useAudioSampleListener,
 } from 'expo-audio';
-import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ViewToken } from 'react-native';
 import {
   Alert,
   FlatList,
-  ImageBackground,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   Share,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const TEST_BEAT = require('../../assets/audio/test-beat.wav');
+const WAVE_BAR_COUNT = 28;
+const MIN_WAVE_HEIGHT = 8;
+const MAX_WAVE_HEIGHT = 130;
 type FeedTab = 'forYou' | 'following';
 type SortMode = 'Recommended' | 'Trending' | 'Recent';
 
@@ -235,6 +246,79 @@ function RailButton({ icon, label, active = false, onPress }: RailButtonProps) {
   );
 }
 
+type AudioWaveformProps = {
+  bars: number[];
+};
+
+function AudioWaveform({ bars }: AudioWaveformProps) {
+  const { width: screenWidth } = useWindowDimensions();
+
+  const canvasWidth = screenWidth - 105;
+  const canvasHeight = 170;
+  const gap = 4;
+
+  const barWidth =
+    (canvasWidth - gap * (bars.length - 1)) / bars.length;
+
+  return (
+    <View
+      pointerEvents="none"
+      style={styles.skiaWaveformContainer}
+    >
+      <Canvas
+        style={{
+          width: canvasWidth,
+          height: canvasHeight,
+        }}
+      >
+        {/* Blurred copy creates the green glow. */}
+        <Group opacity={0.55}>
+          <BlurMask blur={9} style="normal" />
+
+          {bars.map((barHeight, index) => {
+            const height = Math.max(
+              MIN_WAVE_HEIGHT,
+              Math.min(MAX_WAVE_HEIGHT, barHeight),
+            );
+
+            return (
+              <RoundedRect
+                key={`glow-${index}`}
+                x={index * (barWidth + gap)}
+                y={(canvasHeight - height) / 2}
+                width={barWidth}
+                height={height}
+                r={barWidth / 2}
+                color={COLORS.green}
+              />
+            );
+          })}
+        </Group>
+
+        {/* Sharp copy sits above the glow. */}
+        {bars.map((barHeight, index) => {
+          const height = Math.max(
+            MIN_WAVE_HEIGHT,
+            Math.min(MAX_WAVE_HEIGHT, barHeight),
+          );
+
+          return (
+            <RoundedRect
+              key={`bar-${index}`}
+              x={index * (barWidth + gap)}
+              y={(canvasHeight - height) / 2}
+              width={barWidth}
+              height={height}
+              r={barWidth / 2}
+              color={COLORS.green}
+            />
+          );
+        })}
+      </Canvas>
+    </View>
+  );
+}
+
 type BeatCardProps = {
   beat: Beat;
   height: number;
@@ -251,6 +335,87 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 });
 
 const audioStatus = useAudioPlayerStatus(player);
+const [waveBars, setWaveBars] = useState<number[]>(
+  Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT),
+);
+
+const lastWaveUpdate = useRef(0);
+
+useAudioSampleListener(player, (sample) => {
+  if (!active || !audioStatus.playing) {
+    return;
+  }
+
+  const frames = sample.channels[0]?.frames;
+
+  if (!frames || frames.length === 0) {
+    return;
+  }
+
+  // Limit visual updates to roughly 20 frames per second.
+  const now = Date.now();
+
+  if (now - lastWaveUpdate.current < 50) {
+    return;
+  }
+
+  lastWaveUpdate.current = now;
+
+  const framesPerBar = Math.max(
+    1,
+    Math.floor(frames.length / WAVE_BAR_COUNT),
+  );
+
+  const nextBars = Array.from(
+    { length: WAVE_BAR_COUNT },
+    (_, barIndex) => {
+      const start = barIndex * framesPerBar;
+
+      const end =
+        barIndex === WAVE_BAR_COUNT - 1
+          ? frames.length
+          : Math.min(start + framesPerBar, frames.length);
+
+      let sumOfSquares = 0;
+      let frameCount = 0;
+
+      for (let frameIndex = start; frameIndex < end; frameIndex += 1) {
+        const frame = frames[frameIndex] ?? 0;
+
+        sumOfSquares += frame * frame;
+        frameCount += 1;
+      }
+
+      // RMS measures the actual loudness of this part of the sample.
+      const rms = Math.sqrt(
+        sumOfSquares / Math.max(frameCount, 1),
+      );
+
+      const height = MIN_WAVE_HEIGHT + rms * 420;
+
+      return Math.max(
+        MIN_WAVE_HEIGHT,
+        Math.min(MAX_WAVE_HEIGHT, height),
+      );
+    },
+  );
+
+  // Blend new and previous values so the bars move smoothly.
+  setWaveBars((previousBars) =>
+    nextBars.map(
+      (height, index) =>
+        previousBars[index] * 0.35 + height * 0.65,
+    ),
+  );
+});
+
+useEffect(() => {
+  if (!active || !audioStatus.playing) {
+    setWaveBars(
+      Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT),
+    );
+  }
+}, [active, audioStatus.playing]);
 const progress =
   audioStatus.duration > 0
     ? Math.min(audioStatus.currentTime / audioStatus.duration, 1)
@@ -292,21 +457,9 @@ useEffect(() => {
 
   return (
     <View style={[styles.card, { height }]}>
-      <ImageBackground
-        source={{ uri: beat.imageUrl }}
-        resizeMode="cover"
-        style={StyleSheet.absoluteFillObject}
-      >
-        <LinearGradient
-          colors={[
-            'rgba(0,0,0,0.60)',
-            'rgba(0,0,0,0.08)',
-            'rgba(0,0,0,0.18)',
-            'rgba(0,0,0,0.96)',
-          ]}
-          locations={[0, 0.24, 0.55, 1]}
-          style={StyleSheet.absoluteFillObject}
-        />
+      
+    <View style={styles.beatBackground}>
+  
 
         <Pressable
           accessibilityRole="button"
@@ -437,7 +590,7 @@ useEffect(() => {
         </View>
 
         <DraggableRating value={userRating} onChange={setUserRating} />
-      </ImageBackground>
+      </View>
     </View>
   );
 }
@@ -563,11 +716,26 @@ export default function HomeScreen() {
   
 
 useEffect(() => {
-  void setAudioModeAsync({
-    playsInSilentMode: true,
-    interruptionMode: 'doNotMix',
-    shouldRouteThroughEarpiece: false,
-  });
+  const prepareAudio = async () => {
+    if (Platform.OS === 'android') {
+      const permission = await requestRecordingPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert(
+          'Audio visualiser permission',
+          'Permission is required on Android for the music-reactive waveform.',
+        );
+      }
+    }
+
+    await setAudioModeAsync({
+      playsInSilentMode: true,
+      interruptionMode: 'doNotMix',
+      shouldRouteThroughEarpiece: false,
+    });
+  };
+
+  void prepareAudio();
 }, []);
   const insets = useSafeAreaInsets();
 
@@ -744,6 +912,21 @@ useEffect(() => {
 }
 
 const styles = StyleSheet.create({
+  beatBackground: {
+  ...StyleSheet.absoluteFillObject,
+  backgroundColor: COLORS.black,
+},
+
+skiaWaveformContainer: {
+  position: 'absolute',
+  left: 22,
+  right: 78,
+  top: '27%',
+  height: 170,
+  zIndex: 1,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
   screen: {
     flex: 1,
     backgroundColor: COLORS.black,
