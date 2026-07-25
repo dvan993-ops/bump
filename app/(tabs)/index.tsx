@@ -23,10 +23,11 @@ import {
   PanResponder,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   useWindowDimensions,
-  View
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const TEST_BEAT = require('../../assets/audio/test-beat.wav');
@@ -336,99 +337,133 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 
   const lastWaveUpdate = useRef(0);
 
-useAudioSampleListener(player, (sample) => {
-  if (!active || !audioStatus.playing) {
+  useAudioSampleListener(player, (sample) => {
+  if (!active) {
     return;
   }
 
   const frames = sample.channels[0]?.frames;
 
-  if (!frames || frames.length === 0) {
-    return;
-  }
+    if (!frames || frames.length === 0) {
+      return;
+    }
 
-  // Limit the waveform to about 20 updates per second.
-  const now = Date.now();
+    // Limit rendering work to roughly 20 updates per second.
+    const now = Date.now();
 
-  if (now - lastWaveUpdate.current < 50) {
-    return;
-  }
+    if (now - lastWaveUpdate.current < 50) {
+      return;
+    }
 
-  lastWaveUpdate.current = now;
+    lastWaveUpdate.current = now;
 
-  const framesPerBar = Math.max(
-    1,
-    Math.floor(frames.length / WAVE_BAR_COUNT),
-  );
+    if (!hasReceivedSamplesRef.current) {
+      hasReceivedSamplesRef.current = true;
+      setHasReceivedSamples(true);
+    }
 
-  // Calculate the real RMS loudness for each section
-  // of the current audio sample.
-  const rmsValues = Array.from(
-    { length: WAVE_BAR_COUNT },
-    (_, barIndex) => {
-      const start = barIndex * framesPerBar;
+    const framesPerBar = Math.max(
+      1,
+      Math.floor(frames.length / WAVE_BAR_COUNT),
+    );
 
-      const end =
-        barIndex === WAVE_BAR_COUNT - 1
-          ? frames.length
-          : Math.min(start + framesPerBar, frames.length);
+    const nextBars = Array.from(
+      { length: WAVE_BAR_COUNT },
+      (_, barIndex) => {
+        const start = barIndex * framesPerBar;
+        const end =
+          barIndex === WAVE_BAR_COUNT - 1
+            ? frames.length
+            : Math.min(start + framesPerBar, frames.length);
 
-      let sumOfSquares = 0;
-      let frameCount = 0;
+        let sumOfSquares = 0;
+        let frameCount = 0;
 
-      for (
-        let frameIndex = start;
-        frameIndex < end;
-        frameIndex += 1
-      ) {
-        const frame = frames[frameIndex] ?? 0;
+        for (
+          let frameIndex = start;
+          frameIndex < end;
+          frameIndex += 1
+        ) {
+          const frame = frames[frameIndex] ?? 0;
 
-        sumOfSquares += frame * frame;
-        frameCount += 1;
-      }
+          sumOfSquares += frame * frame;
+          frameCount += 1;
+        }
 
-      return Math.sqrt(
-        sumOfSquares / Math.max(frameCount, 1),
-      );
-    },
-  );
+        const rms = Math.sqrt(
+          sumOfSquares / Math.max(frameCount, 1),
+        );
 
-  const peakRms = Math.max(...rmsValues, 0.001);
+        // Convert loudness to decibels. This prevents loud tracks from
+        // immediately forcing every bar to the maximum height.
+        const decibels = 20 * Math.log10(rms + 0.000001);
+        const normalized = Math.max(
+          0,
+          Math.min(1, (decibels + 55) / 52),
+        );
 
-  // Controls how strongly the overall music volume
-  // affects the waveform. Lower = less sensitive.
-  const overallLevel = Math.min(
-    1,
-    Math.max(0, (peakRms - 0.01) * 3.2),
-  );
+        // A stronger curve leaves more room for visible differences.
+        const shapedLevel = Math.pow(normalized, 1.5);
 
-  const nextBars = rmsValues.map((rms) => {
-    // Keeps differences between the bars visible.
-    const relativeLevel = Math.min(1, rms / peakRms);
+        return (
+          MIN_WAVE_HEIGHT +
+          shapedLevel *
+            (MAX_WAVE_HEIGHT - MIN_WAVE_HEIGHT)
+        );
+      },
+    );
 
-    const combinedLevel =
-      overallLevel * (0.2 + relativeLevel * 0.8);
-
-    // Slight curve gives better movement at lower volumes
-    // without instantly reaching maximum height.
-    const shapedLevel = Math.pow(combinedLevel, 0.85);
-
-    return (
-      MIN_WAVE_HEIGHT +
-      shapedLevel *
-        (MAX_WAVE_HEIGHT - MIN_WAVE_HEIGHT)
+    // Smooth the movement without allowing the bars to remain permanently full.
+    setWaveBars((previousBars) =>
+      nextBars.map(
+        (nextHeight, index) =>
+          previousBars[index] * 0.65 + nextHeight * 0.35,
+      ),
     );
   });
 
-  // Smooth out sharp jumps without making the bars sluggish.
-  setWaveBars((previousBars) =>
-    nextBars.map(
-      (nextHeight, index) =>
-        previousBars[index] * 0.55 +
-        nextHeight * 0.45,
-    ),
-  );
-});
+  useEffect(() => {
+    player.loop = true;
+    player.volume = 1;
+  }, [player]);
+
+  useEffect(() => {
+    if (active && !paused) {
+      player.play();
+    } else {
+      player.pause();
+    }
+
+    if (!active) {
+      void player.seekTo(0);
+      setWaveBars(Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT));
+      hasReceivedSamplesRef.current = false;
+      setHasReceivedSamples(false);
+    }
+  }, [active, paused, player]);
+
+  const progress =
+    audioStatus.duration > 0
+      ? Math.min(audioStatus.currentTime / audioStatus.duration, 1)
+      : 0;
+
+  const progressWidth = `${progress * 100}%` as `${number}%`;
+
+  const displayedAverage =
+    userRating === 0
+      ? beat.averageRating
+      : (beat.averageRating * beat.ratingCount + userRating) /
+        (beat.ratingCount + 1);
+
+  const shareBeat = async () => {
+    try {
+      await Share.share({
+        message: `Listen to "${beat.title}" by @${beat.producer} on Bump.`,
+      });
+    } catch {
+      Alert.alert('Could not open sharing');
+    }
+  };
 
   return (
     <View style={[styles.card, { height }]}>
@@ -756,23 +791,22 @@ useEffect(() => {
   }, [activeTab, genre, sortMode]);
 
   const onViewableItemsChanged = useRef(
-  ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const visibleItem = viewableItems.find(
-      (item) => item.isViewable,
-    );
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      const visibleItem = viewableItems.find(
+        (item) => item.isViewable,
+      );
+      const visibleBeat = visibleItem?.item as Beat | undefined;
 
-    const visibleBeat = visibleItem?.item as Beat | undefined;
-
-    if (visibleBeat) {
-      setActiveBeatId(visibleBeat.id);
-    }
-  },
-).current;
+      if (visibleBeat) {
+        setActiveBeatId(visibleBeat.id);
+      }
+    },
+  ).current;
 
   const viewabilityConfig = useRef({
-  itemVisiblePercentThreshold: 80,
-  minimumViewTime: 100,
-}).current;
+    itemVisiblePercentThreshold: 80,
+    minimumViewTime: 100,
+  }).current;
 
   const filtersActive = genre !== 'All' || sortMode !== 'Recommended';
 
@@ -788,6 +822,7 @@ useEffect(() => {
         <FlatList
           data={filteredBeats}
           extraData={activeBeatId}
+          removeClippedSubviews={false}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <BeatCard
