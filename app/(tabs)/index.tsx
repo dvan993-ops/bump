@@ -32,7 +32,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const TEST_BEAT = require('../../assets/audio/test-beat.wav');
 const WAVE_BAR_COUNT = 28;
-const MIN_WAVE_HEIGHT = 8;
+const MIN_WAVE_HEIGHT = 4;
 const MAX_WAVE_HEIGHT = 130;
 type FeedTab = 'forYou' | 'following';
 type SortMode = 'Recommended' | 'Trending' | 'Recent';
@@ -339,10 +339,10 @@ const [waveBars, setWaveBars] = useState<number[]>(
   Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT),
 );
 
-const lastWaveUpdate = useRef(0);
+const [samplesReceived, setSamplesReceived] = useState(0);
 
 useAudioSampleListener(player, (sample) => {
-  if (!active || !audioStatus.playing) {
+  if (!active) {
     return;
   }
 
@@ -352,61 +352,29 @@ useAudioSampleListener(player, (sample) => {
     return;
   }
 
-  // Limit visual updates to roughly 20 frames per second.
-  const now = Date.now();
+  setSamplesReceived((count) => count + 1);
 
-  if (now - lastWaveUpdate.current < 50) {
-    return;
+  let sumOfSquares = 0;
+
+  for (const frame of frames) {
+    sumOfSquares += frame * frame;
   }
 
-  lastWaveUpdate.current = now;
+  // Real loudness from the current audio sample.
+  const rms = Math.sqrt(sumOfSquares / frames.length);
 
-  const framesPerBar = Math.max(
-    1,
-    Math.floor(frames.length / WAVE_BAR_COUNT),
-  );
+  // Boost quiet audio so movement is clearly visible.
+  const loudness = Math.min(1, rms * 18);
 
-  const nextBars = Array.from(
-    { length: WAVE_BAR_COUNT },
-    (_, barIndex) => {
-      const start = barIndex * framesPerBar;
+  const newHeight =
+    MIN_WAVE_HEIGHT +
+    loudness * (MAX_WAVE_HEIGHT - MIN_WAVE_HEIGHT);
 
-      const end =
-        barIndex === WAVE_BAR_COUNT - 1
-          ? frames.length
-          : Math.min(start + framesPerBar, frames.length);
-
-      let sumOfSquares = 0;
-      let frameCount = 0;
-
-      for (let frameIndex = start; frameIndex < end; frameIndex += 1) {
-        const frame = frames[frameIndex] ?? 0;
-
-        sumOfSquares += frame * frame;
-        frameCount += 1;
-      }
-
-      // RMS measures the actual loudness of this part of the sample.
-      const rms = Math.sqrt(
-        sumOfSquares / Math.max(frameCount, 1),
-      );
-
-      const height = MIN_WAVE_HEIGHT + rms * 420;
-
-      return Math.max(
-        MIN_WAVE_HEIGHT,
-        Math.min(MAX_WAVE_HEIGHT, height),
-      );
-    },
-  );
-
-  // Blend new and previous values so the bars move smoothly.
-  setWaveBars((previousBars) =>
-    nextBars.map(
-      (height, index) =>
-        previousBars[index] * 0.35 + height * 0.65,
-    ),
-  );
+  // Move the previous readings left and add the latest real reading.
+  setWaveBars((previousBars) => [
+    ...previousBars.slice(1),
+    newHeight,
+  ]);
 });
 
 useEffect(() => {
@@ -416,6 +384,24 @@ useEffect(() => {
     );
   }
 }, [active, audioStatus.playing]);
+
+<Text
+  style={{
+    position: 'absolute',
+    top: '50%',
+    alignSelf: 'center',
+    zIndex: 20,
+    color: '#FFFFFF',
+    fontSize: 13,
+  }}
+>
+  {!player.isAudioSamplingSupported
+    ? 'SAMPLING UNSUPPORTED'
+    : samplesReceived > 0
+      ? `LIVE SAMPLES: ${samplesReceived}`
+      : 'WAITING FOR SAMPLES'}
+</Text>
+
 const progress =
   audioStatus.duration > 0
     ? Math.min(audioStatus.currentTime / audioStatus.duration, 1)
