@@ -23,16 +23,15 @@ import {
   PanResponder,
   Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   useWindowDimensions,
-  View,
+  View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const TEST_BEAT = require('../../assets/audio/test-beat.wav');
 const WAVE_BAR_COUNT = 28;
-const MIN_WAVE_HEIGHT = 4;
+const MIN_WAVE_HEIGHT = 8;
 const MAX_WAVE_HEIGHT = 130;
 type FeedTab = 'forYou' | 'following';
 type SortMode = 'Recommended' | 'Trending' | 'Recent';
@@ -53,7 +52,6 @@ type Beat = {
   followed: boolean;
   recommendedScore: number;
   createdAt: string;
-  imageUrl: string;
 };
 
 const COLORS = {
@@ -86,8 +84,6 @@ const BEATS: Beat[] = [
     followed: true,
     recommendedScore: 98,
     createdAt: '2026-07-23T08:30:00Z',
-    imageUrl:
-      'https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?auto=format&fit=crop&w=1400&q=90',
   },
   {
     id: '2',
@@ -105,8 +101,6 @@ const BEATS: Beat[] = [
     followed: false,
     recommendedScore: 95,
     createdAt: '2026-07-22T21:15:00Z',
-    imageUrl:
-      'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1400&q=90',
   },
   {
     id: '3',
@@ -124,8 +118,6 @@ const BEATS: Beat[] = [
     followed: true,
     recommendedScore: 93,
     createdAt: '2026-07-20T13:00:00Z',
-    imageUrl:
-      'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1400&q=90',
   },
   {
     id: '4',
@@ -143,8 +135,6 @@ const BEATS: Beat[] = [
     followed: false,
     recommendedScore: 89,
     createdAt: '2026-07-23T10:45:00Z',
-    imageUrl:
-      'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1400&q=90',
   },
 ];
 
@@ -330,19 +320,24 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
   const [following, setFollowing] = useState(beat.followed);
   const [paused, setPaused] = useState(false);
   const [userRating, setUserRating] = useState(0);
+  const [hasReceivedSamples, setHasReceivedSamples] = useState(false);
+
   const player = useAudioPlayer(TEST_BEAT, {
-  updateInterval: 100,
-});
+    updateInterval: 100,
+  });
 
-const audioStatus = useAudioPlayerStatus(player);
-const [waveBars, setWaveBars] = useState<number[]>(
-  Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT),
-);
+  const audioStatus = useAudioPlayerStatus(player);
 
-const [samplesReceived, setSamplesReceived] = useState(0);
+  const [waveBars, setWaveBars] = useState<number[]>(
+    Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT),
+  );
+
+  const hasReceivedSamplesRef = useRef(false);
+
+  const lastWaveUpdate = useRef(0);
 
 useAudioSampleListener(player, (sample) => {
-  if (!active) {
+  if (!active || !audioStatus.playing) {
     return;
   }
 
@@ -352,102 +347,104 @@ useAudioSampleListener(player, (sample) => {
     return;
   }
 
-  setSamplesReceived((count) => count + 1);
+  // Limit the waveform to about 20 updates per second.
+  const now = Date.now();
 
-  let sumOfSquares = 0;
-
-  for (const frame of frames) {
-    sumOfSquares += frame * frame;
+  if (now - lastWaveUpdate.current < 50) {
+    return;
   }
 
-  // Real loudness from the current audio sample.
-  const rms = Math.sqrt(sumOfSquares / frames.length);
+  lastWaveUpdate.current = now;
 
-  // Boost quiet audio so movement is clearly visible.
-  const loudness = Math.min(1, rms * 18);
+  const framesPerBar = Math.max(
+    1,
+    Math.floor(frames.length / WAVE_BAR_COUNT),
+  );
 
-  const newHeight =
-    MIN_WAVE_HEIGHT +
-    loudness * (MAX_WAVE_HEIGHT - MIN_WAVE_HEIGHT);
+  // Calculate the real RMS loudness for each section
+  // of the current audio sample.
+  const rmsValues = Array.from(
+    { length: WAVE_BAR_COUNT },
+    (_, barIndex) => {
+      const start = barIndex * framesPerBar;
 
-  // Move the previous readings left and add the latest real reading.
-  setWaveBars((previousBars) => [
-    ...previousBars.slice(1),
-    newHeight,
-  ]);
-});
+      const end =
+        barIndex === WAVE_BAR_COUNT - 1
+          ? frames.length
+          : Math.min(start + framesPerBar, frames.length);
 
-useEffect(() => {
-  if (!active || !audioStatus.playing) {
-    setWaveBars(
-      Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT),
+      let sumOfSquares = 0;
+      let frameCount = 0;
+
+      for (
+        let frameIndex = start;
+        frameIndex < end;
+        frameIndex += 1
+      ) {
+        const frame = frames[frameIndex] ?? 0;
+
+        sumOfSquares += frame * frame;
+        frameCount += 1;
+      }
+
+      return Math.sqrt(
+        sumOfSquares / Math.max(frameCount, 1),
+      );
+    },
+  );
+
+  const peakRms = Math.max(...rmsValues, 0.001);
+
+  // Controls how strongly the overall music volume
+  // affects the waveform. Lower = less sensitive.
+  const overallLevel = Math.min(
+    1,
+    Math.max(0, (peakRms - 0.01) * 3.2),
+  );
+
+  const nextBars = rmsValues.map((rms) => {
+    // Keeps differences between the bars visible.
+    const relativeLevel = Math.min(1, rms / peakRms);
+
+    const combinedLevel =
+      overallLevel * (0.2 + relativeLevel * 0.8);
+
+    // Slight curve gives better movement at lower volumes
+    // without instantly reaching maximum height.
+    const shapedLevel = Math.pow(combinedLevel, 0.85);
+
+    return (
+      MIN_WAVE_HEIGHT +
+      shapedLevel *
+        (MAX_WAVE_HEIGHT - MIN_WAVE_HEIGHT)
     );
-  }
-}, [active, audioStatus.playing]);
+  });
 
-<Text
-  style={{
-    position: 'absolute',
-    top: '50%',
-    alignSelf: 'center',
-    zIndex: 20,
-    color: '#FFFFFF',
-    fontSize: 13,
-  }}
->
-  {!player.isAudioSamplingSupported
-    ? 'SAMPLING UNSUPPORTED'
-    : samplesReceived > 0
-      ? `LIVE SAMPLES: ${samplesReceived}`
-      : 'WAITING FOR SAMPLES'}
-</Text>
-
-const progress =
-  audioStatus.duration > 0
-    ? Math.min(audioStatus.currentTime / audioStatus.duration, 1)
-    : 0;
-
-const progressWidth = `${progress * 100}%` as `${number}%`;
-
-useEffect(() => {
-  player.loop = true;
-}, [player]);
-
-useEffect(() => {
-  if (active && !paused) {
-    player.play();
-  } else {
-    player.pause();
-  }
-
-  if (!active) {
-    void player.seekTo(0);
-  }
-}, [active, paused, player]);
-
-  const displayedAverage =
-    userRating === 0
-      ? beat.averageRating
-      : (beat.averageRating * beat.ratingCount + userRating) /
-        (beat.ratingCount + 1);
-
-  const shareBeat = async () => {
-    try {
-      await Share.share({
-        message: `Listen to "${beat.title}" by @${beat.producer} on Bump.`,
-      });
-    } catch {
-      Alert.alert('Could not open sharing');
-    }
-  };
+  // Smooth out sharp jumps without making the bars sluggish.
+  setWaveBars((previousBars) =>
+    nextBars.map(
+      (nextHeight, index) =>
+        previousBars[index] * 0.55 +
+        nextHeight * 0.45,
+    ),
+  );
+});
 
   return (
     <View style={[styles.card, { height }]}>
       
     <View style={styles.beatBackground}>
-  
+      <AudioWaveform bars={waveBars} />
 
-        <Pressable
+      <Text style={styles.samplingStatus}>
+        {!player.isAudioSamplingSupported
+          ? 'SAMPLING UNSUPPORTED'
+          : hasReceivedSamples
+            ? 'LIVE AUDIO'
+            : 'WAITING FOR AUDIO'}
+      </Text>
+
+      <Pressable
           accessibilityRole="button"
           accessibilityLabel={paused ? 'Play preview' : 'Pause preview'}
           onPress={() => setPaused((current) => !current)}
@@ -759,18 +756,23 @@ useEffect(() => {
   }, [activeTab, genre, sortMode]);
 
   const onViewableItemsChanged = useRef(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const visibleBeat = viewableItems[0]?.item as Beat | undefined;
+  ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const visibleItem = viewableItems.find(
+      (item) => item.isViewable,
+    );
 
-      if (visibleBeat) {
-        setActiveBeatId(visibleBeat.id);
-      }
-    },
-  ).current;
+    const visibleBeat = visibleItem?.item as Beat | undefined;
+
+    if (visibleBeat) {
+      setActiveBeatId(visibleBeat.id);
+    }
+  },
+).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 70,
-  }).current;
+  itemVisiblePercentThreshold: 80,
+  minimumViewTime: 100,
+}).current;
 
   const filtersActive = genre !== 'All' || sortMode !== 'Recommended';
 
@@ -785,6 +787,7 @@ useEffect(() => {
       {feedHeight > 0 && (
         <FlatList
           data={filteredBeats}
+          extraData={activeBeatId}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <BeatCard
@@ -899,11 +902,11 @@ useEffect(() => {
 
 const styles = StyleSheet.create({
   beatBackground: {
-  ...StyleSheet.absoluteFillObject,
-  backgroundColor: COLORS.black,
-},
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.black,
+  },
 
-skiaWaveformContainer: {
+  skiaWaveformContainer: {
   position: 'absolute',
   left: 22,
   right: 78,
@@ -912,6 +915,16 @@ skiaWaveformContainer: {
   zIndex: 1,
   alignItems: 'center',
   justifyContent: 'center',
+},
+  samplingStatus: {
+  position: 'absolute',
+  top: '49%',
+  alignSelf: 'center',
+  zIndex: 3,
+  color: COLORS.grey,
+  fontSize: 11,
+  fontWeight: '700',
+  letterSpacing: 0.7,
 },
   screen: {
     flex: 1,
