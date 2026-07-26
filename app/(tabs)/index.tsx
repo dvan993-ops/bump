@@ -1,22 +1,39 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { LinearGradient } from 'expo-linear-gradient';
+
+import {
+  BlurMask,
+  Canvas,
+  Group,
+  RoundedRect,
+} from '@shopify/react-native-skia';
+import {
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioPlayerStatus,
+  useAudioSampleListener,
+} from 'expo-audio';
 import { StatusBar } from 'expo-status-bar';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ViewToken } from 'react-native';
 import {
   Alert,
   FlatList,
-  ImageBackground,
   Modal,
   PanResponder,
+  Platform,
   Pressable,
   Share,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-
+const TEST_BEAT = require('../../assets/audio/test-beat.wav');
+const WAVE_BAR_COUNT = 28;
+const MIN_WAVE_HEIGHT = 8;
+const MAX_WAVE_HEIGHT = 130;
 type FeedTab = 'forYou' | 'following';
 type SortMode = 'Recommended' | 'Trending' | 'Recent';
 
@@ -36,7 +53,6 @@ type Beat = {
   followed: boolean;
   recommendedScore: number;
   createdAt: string;
-  imageUrl: string;
 };
 
 const COLORS = {
@@ -49,7 +65,7 @@ const COLORS = {
   white: '#FFFFFF',
   grey: '#B3B3B3',
   muted: '#777777',
-  border: 'rgba(255,255,255,0.18)',
+  border: 'rgba(0,0,0,1)',
 };
 
 const BEATS: Beat[] = [
@@ -69,8 +85,6 @@ const BEATS: Beat[] = [
     followed: true,
     recommendedScore: 98,
     createdAt: '2026-07-23T08:30:00Z',
-    imageUrl:
-      'https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?auto=format&fit=crop&w=1400&q=90',
   },
   {
     id: '2',
@@ -88,8 +102,6 @@ const BEATS: Beat[] = [
     followed: false,
     recommendedScore: 95,
     createdAt: '2026-07-22T21:15:00Z',
-    imageUrl:
-      'https://images.unsplash.com/photo-1493225457124-a3eb161ffa5f?auto=format&fit=crop&w=1400&q=90',
   },
   {
     id: '3',
@@ -107,8 +119,6 @@ const BEATS: Beat[] = [
     followed: true,
     recommendedScore: 93,
     createdAt: '2026-07-20T13:00:00Z',
-    imageUrl:
-      'https://images.unsplash.com/photo-1516280440614-37939bbacd81?auto=format&fit=crop&w=1400&q=90',
   },
   {
     id: '4',
@@ -126,13 +136,15 @@ const BEATS: Beat[] = [
     followed: false,
     recommendedScore: 89,
     createdAt: '2026-07-23T10:45:00Z',
-    imageUrl:
-      'https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=1400&q=90',
   },
 ];
 
 const GENRES = ['All', 'Trap', 'Drill', 'R&B', 'Hip-Hop'];
 
+/**
+ * Converts large numbers into short labels for the UI.
+ * Example: 2418 becomes "2.4k" and 1200000 becomes "1.2m".
+ */
 function formatCount(value: number): string {
   if (value >= 1_000_000) {
     return `${(value / 1_000_000).toFixed(1).replace('.0', '')}m`;
@@ -150,9 +162,14 @@ type DraggableRatingProps = {
   onChange: (rating: number) => void;
 };
 
+/**
+ * Displays the five-star rating control.
+ * The user can tap or drag across the stars to choose a rating from 0 to 5.
+ */
 function DraggableRating({ value, onChange }: DraggableRatingProps) {
   const [trackWidth, setTrackWidth] = useState(1);
 
+  // Creates and remembers the touch/drag handler used by the star rating control.
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -209,6 +226,9 @@ type RailButtonProps = {
   onPress: () => void;
 };
 
+/**
+ * Renders one action button in the right-hand rail, such as like, comment, rating, or share.
+ */
 function RailButton({ icon, label, active = false, onPress }: RailButtonProps) {
   return (
     <Pressable
@@ -229,17 +249,228 @@ function RailButton({ icon, label, active = false, onPress }: RailButtonProps) {
   );
 }
 
+type AudioWaveformProps = {
+  bars: number[];
+};
+
+/**
+ * Draws the glowing green audio visualizer with React Native Skia.
+ * Each value in `bars` controls the height of one visualizer bar.
+ */
+function AudioWaveform({ bars }: AudioWaveformProps) {
+  const { width: screenWidth } = useWindowDimensions();
+
+  const canvasWidth = screenWidth - 105;
+  const canvasHeight = 170;
+  const gap = 4;
+
+  const barWidth =
+    (canvasWidth - gap * (bars.length - 1)) / bars.length;
+
+  return (
+    <View
+      pointerEvents="none"
+      style={styles.skiaWaveformContainer}
+    >
+      <Canvas
+        style={{
+          width: canvasWidth,
+          height: canvasHeight,
+        }}
+      >
+        {/* Blurred copy creates the green glow. */}
+        <Group opacity={0.55}>
+          <BlurMask blur={9} style="normal" />
+
+          {bars.map((barHeight, index) => {
+            const height = Math.max(
+              MIN_WAVE_HEIGHT,
+              Math.min(MAX_WAVE_HEIGHT, barHeight),
+            );
+
+            return (
+              <RoundedRect
+                key={`glow-${index}`}
+                x={index * (barWidth + gap)}
+                y={(canvasHeight - height) / 2}
+                width={barWidth}
+                height={height}
+                r={barWidth / 2}
+                color={COLORS.green}
+              />
+            );
+          })}
+        </Group>
+
+        {/* Sharp copy sits above the glow. */}
+        {bars.map((barHeight, index) => {
+          const height = Math.max(
+            MIN_WAVE_HEIGHT,
+            Math.min(MAX_WAVE_HEIGHT, barHeight),
+          );
+
+          return (
+            <RoundedRect
+              key={`bar-${index}`}
+              x={index * (barWidth + gap)}
+              y={(canvasHeight - height) / 2}
+              width={barWidth}
+              height={height}
+              r={barWidth / 2}
+              color={COLORS.green}
+            />
+          );
+        })}
+      </Canvas>
+    </View>
+  );
+}
+
 type BeatCardProps = {
   beat: Beat;
   height: number;
   active: boolean;
 };
 
+/**
+ * Renders one full-screen beat in the scrolling feed.
+ * It manages playback, visualizer data, likes, following, ratings, sharing, and beat details.
+ */
 function BeatCard({ beat, height, active }: BeatCardProps) {
   const [liked, setLiked] = useState(false);
   const [following, setFollowing] = useState(beat.followed);
   const [paused, setPaused] = useState(false);
   const [userRating, setUserRating] = useState(0);
+  const [hasReceivedSamples, setHasReceivedSamples] = useState(false);
+
+  const player = useAudioPlayer(TEST_BEAT, {
+    updateInterval: 100,
+  });
+
+  const audioStatus = useAudioPlayerStatus(player);
+
+  const [waveBars, setWaveBars] = useState<number[]>(
+    Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT),
+  );
+
+  const hasReceivedSamplesRef = useRef(false);
+
+  const lastWaveUpdate = useRef(0);
+
+  // Receives live PCM audio samples from the player and converts their loudness into bar heights.
+  useAudioSampleListener(player, (sample) => {
+  if (!active) {
+    return;
+  }
+
+  const frames = sample.channels[0]?.frames;
+
+    if (!frames || frames.length === 0) {
+      return;
+    }
+
+    // Limit rendering work to roughly 20 updates per second.
+    const now = Date.now();
+
+    if (now - lastWaveUpdate.current < 50) {
+      return;
+    }
+
+    lastWaveUpdate.current = now;
+
+    if (!hasReceivedSamplesRef.current) {
+      hasReceivedSamplesRef.current = true;
+      setHasReceivedSamples(true);
+    }
+
+    const framesPerBar = Math.max(
+      1,
+      Math.floor(frames.length / WAVE_BAR_COUNT),
+    );
+
+    const nextBars = Array.from(
+      { length: WAVE_BAR_COUNT },
+      (_, barIndex) => {
+        const start = barIndex * framesPerBar;
+        const end =
+          barIndex === WAVE_BAR_COUNT - 1
+            ? frames.length
+            : Math.min(start + framesPerBar, frames.length);
+
+        let sumOfSquares = 0;
+        let frameCount = 0;
+
+        for (
+          let frameIndex = start;
+          frameIndex < end;
+          frameIndex += 1
+        ) {
+          const frame = frames[frameIndex] ?? 0;
+
+          sumOfSquares += frame * frame;
+          frameCount += 1;
+        }
+
+        const rms = Math.sqrt(
+          sumOfSquares / Math.max(frameCount, 1),
+        );
+
+        // Convert loudness to decibels. This prevents loud tracks from
+        // immediately forcing every bar to the maximum height.
+        const decibels = 20 * Math.log10(rms + 0.000001);
+        const normalized = Math.max(
+          0,
+          Math.min(1, (decibels + 55) / 52),
+        );
+
+        // A stronger curve leaves more room for visible differences.
+        const shapedLevel = Math.pow(normalized, 1.5);
+
+        return (
+          MIN_WAVE_HEIGHT +
+          shapedLevel *
+            (MAX_WAVE_HEIGHT - MIN_WAVE_HEIGHT)
+        );
+      },
+    );
+
+    // Smooth the movement without allowing the bars to remain permanently full.
+    setWaveBars((previousBars) =>
+      nextBars.map(
+        (nextHeight, index) =>
+          previousBars[index] * 0.65 + nextHeight * 0.35,
+      ),
+    );
+  });
+
+  // Configures the audio player to loop the preview and play at full volume.
+  useEffect(() => {
+    player.loop = true;
+    player.volume = 1;
+  }, [player]);
+
+  // Starts the active card, pauses inactive cards, and resets cards when the user scrolls away.
+  useEffect(() => {
+    if (active && !paused) {
+      player.play();
+    } else {
+      player.pause();
+    }
+
+    if (!active) {
+      void player.seekTo(0);
+      setWaveBars(Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT));
+      hasReceivedSamplesRef.current = false;
+      setHasReceivedSamples(false);
+    }
+  }, [active, paused, player]);
+
+  const progress =
+    audioStatus.duration > 0
+      ? Math.min(audioStatus.currentTime / audioStatus.duration, 1)
+      : 0;
+
+  const progressWidth = `${progress * 100}%` as `${number}%`;
 
   const displayedAverage =
     userRating === 0
@@ -247,6 +478,7 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
       : (beat.averageRating * beat.ratingCount + userRating) /
         (beat.ratingCount + 1);
 
+  // Opens the phone's native share menu with a message for the current beat.
   const shareBeat = async () => {
     try {
       await Share.share({
@@ -259,23 +491,19 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 
   return (
     <View style={[styles.card, { height }]}>
-      <ImageBackground
-        source={{ uri: beat.imageUrl }}
-        resizeMode="cover"
-        style={StyleSheet.absoluteFillObject}
-      >
-        <LinearGradient
-          colors={[
-            'rgba(0,0,0,0.60)',
-            'rgba(0,0,0,0.08)',
-            'rgba(0,0,0,0.18)',
-            'rgba(0,0,0,0.96)',
-          ]}
-          locations={[0, 0.24, 0.55, 1]}
-          style={StyleSheet.absoluteFillObject}
-        />
+      
+    <View style={styles.beatBackground}>
+      <AudioWaveform bars={waveBars} />
 
-        <Pressable
+      <Text style={styles.samplingStatus}>
+        {!player.isAudioSamplingSupported
+          ? 'SAMPLING UNSUPPORTED'
+          : hasReceivedSamples
+            ? 'LIVE AUDIO'
+            : 'WAITING FOR AUDIO'}
+      </Text>
+
+      <Pressable
           accessibilityRole="button"
           accessibilityLabel={paused ? 'Play preview' : 'Pause preview'}
           onPress={() => setPaused((current) => !current)}
@@ -392,12 +620,19 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
           </View>
 
           <View style={styles.progressTrack}>
-            <View style={styles.progressFill} />
+            <View
+  style={[
+    styles.progressFill,
+    {
+      width: progressWidth,
+    },
+  ]}
+/>
           </View>
         </View>
 
         <DraggableRating value={userRating} onChange={setUserRating} />
-      </ImageBackground>
+      </View>
     </View>
   );
 }
@@ -410,6 +645,9 @@ type FilterSheetProps = {
   onApply: (genre: string, sort: SortMode) => void;
 };
 
+/**
+ * Displays the bottom-sheet filter menu for choosing a genre and feed sorting mode.
+ */
 function FilterSheet({
   visible,
   currentGenre,
@@ -420,6 +658,7 @@ function FilterSheet({
   const [draftGenre, setDraftGenre] = useState(currentGenre);
   const [draftSort, setDraftSort] = useState<SortMode>(currentSort);
 
+  // Restores the temporary filter choices to the currently applied values whenever the sheet opens.
   const resetDrafts = () => {
     setDraftGenre(currentGenre);
     setDraftSort(currentSort);
@@ -519,7 +758,36 @@ function FilterSheet({
   );
 }
 
+/**
+ * Main Home tab for Bump.
+ * It prepares audio, filters and sorts beats, tracks the visible card, and renders the scrolling feed.
+ */
 export default function HomeScreen() {
+  // Runs once when the Home screen loads to prepare audio playback and sampling.
+  useEffect(() => {
+    // Requests permission when required and sets the app's playback behaviour.
+    const prepareAudio = async () => {
+      if (Platform.OS === 'android') {
+        const permission = await requestRecordingPermissionsAsync();
+
+        if (!permission.granted) {
+          Alert.alert(
+            'Audio visualiser permission',
+            'Permission is required on Android for the music-reactive waveform.',
+          );
+        }
+      }
+
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'doNotMix',
+        shouldRouteThroughEarpiece: false,
+      });
+    };
+
+    void prepareAudio();
+  }, []);
+
   const insets = useSafeAreaInsets();
 
   const [feedHeight, setFeedHeight] = useState(0);
@@ -529,6 +797,7 @@ export default function HomeScreen() {
   const [sortMode, setSortMode] = useState<SortMode>('Recommended');
   const [filtersOpen, setFiltersOpen] = useState(false);
 
+  // Builds the feed from the selected tab, genre filter, and sorting option.
   const filteredBeats = useMemo(() => {
     let result =
       activeTab === 'following'
@@ -555,9 +824,13 @@ export default function HomeScreen() {
     });
   }, [activeTab, genre, sortMode]);
 
+  // Updates `activeBeatId` whenever the user scrolls to a different full-screen beat.
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const visibleBeat = viewableItems[0]?.item as Beat | undefined;
+      const visibleItem = viewableItems.find(
+        (item) => item.isViewable,
+      );
+      const visibleBeat = visibleItem?.item as Beat | undefined;
 
       if (visibleBeat) {
         setActiveBeatId(visibleBeat.id);
@@ -566,7 +839,8 @@ export default function HomeScreen() {
   ).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 70,
+    itemVisiblePercentThreshold: 80,
+    minimumViewTime: 100,
   }).current;
 
   const filtersActive = genre !== 'All' || sortMode !== 'Recommended';
@@ -576,11 +850,14 @@ export default function HomeScreen() {
       onLayout={(event) => setFeedHeight(event.nativeEvent.layout.height)}
       style={styles.screen}
     >
+      
       <StatusBar style="light" />
 
       {feedHeight > 0 && (
         <FlatList
           data={filteredBeats}
+          extraData={activeBeatId}
+          removeClippedSubviews={false}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <BeatCard
@@ -694,6 +971,31 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  beatBackground: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: COLORS.black,
+  },
+
+  skiaWaveformContainer: {
+  position: 'absolute',
+  left: 22,
+  right: 78,
+  top: '27%',
+  height: 170,
+  zIndex: 1,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+  samplingStatus: {
+  position: 'absolute',
+  top: '49%',
+  alignSelf: 'center',
+  zIndex: 3,
+  color: COLORS.grey,
+  fontSize: 11,
+  fontWeight: '700',
+  letterSpacing: 0.7,
+},
   screen: {
     flex: 1,
     backgroundColor: COLORS.black,
@@ -923,7 +1225,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.26)',
   },
   progressFill: {
-    width: '36%',
     height: '100%',
     backgroundColor: COLORS.green,
   },
