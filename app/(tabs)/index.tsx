@@ -65,7 +65,7 @@ const COLORS = {
   white: '#FFFFFF',
   grey: '#B3B3B3',
   muted: '#777777',
-  border: 'rgba(255,255,255,0.18)',
+  border: 'rgba(0,0,0,1)',
 };
 
 const BEATS: Beat[] = [
@@ -141,6 +141,10 @@ const BEATS: Beat[] = [
 
 const GENRES = ['All', 'Trap', 'Drill', 'R&B', 'Hip-Hop'];
 
+/**
+ * Converts large numbers into short labels for the UI.
+ * Example: 2418 becomes "2.4k" and 1200000 becomes "1.2m".
+ */
 function formatCount(value: number): string {
   if (value >= 1_000_000) {
     return `${(value / 1_000_000).toFixed(1).replace('.0', '')}m`;
@@ -158,9 +162,14 @@ type DraggableRatingProps = {
   onChange: (rating: number) => void;
 };
 
+/**
+ * Displays the five-star rating control.
+ * The user can tap or drag across the stars to choose a rating from 0 to 5.
+ */
 function DraggableRating({ value, onChange }: DraggableRatingProps) {
   const [trackWidth, setTrackWidth] = useState(1);
 
+  // Creates and remembers the touch/drag handler used by the star rating control.
   const panResponder = useMemo(
     () =>
       PanResponder.create({
@@ -217,6 +226,9 @@ type RailButtonProps = {
   onPress: () => void;
 };
 
+/**
+ * Renders one action button in the right-hand rail, such as like, comment, rating, or share.
+ */
 function RailButton({ icon, label, active = false, onPress }: RailButtonProps) {
   return (
     <Pressable
@@ -241,6 +253,10 @@ type AudioWaveformProps = {
   bars: number[];
 };
 
+/**
+ * Draws the glowing green audio visualizer with React Native Skia.
+ * Each value in `bars` controls the height of one visualizer bar.
+ */
 function AudioWaveform({ bars }: AudioWaveformProps) {
   const { width: screenWidth } = useWindowDimensions();
 
@@ -316,6 +332,10 @@ type BeatCardProps = {
   active: boolean;
 };
 
+/**
+ * Renders one full-screen beat in the scrolling feed.
+ * It manages playback, visualizer data, likes, following, ratings, sharing, and beat details.
+ */
 function BeatCard({ beat, height, active }: BeatCardProps) {
   const [liked, setLiked] = useState(false);
   const [following, setFollowing] = useState(beat.followed);
@@ -337,6 +357,7 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 
   const lastWaveUpdate = useRef(0);
 
+  // Receives live PCM audio samples from the player and converts their loudness into bar heights.
   useAudioSampleListener(player, (sample) => {
   if (!active) {
     return;
@@ -422,11 +443,13 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
     );
   });
 
+  // Configures the audio player to loop the preview and play at full volume.
   useEffect(() => {
     player.loop = true;
     player.volume = 1;
   }, [player]);
 
+  // Starts the active card, pauses inactive cards, and resets cards when the user scrolls away.
   useEffect(() => {
     if (active && !paused) {
       player.play();
@@ -455,6 +478,7 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
       : (beat.averageRating * beat.ratingCount + userRating) /
         (beat.ratingCount + 1);
 
+  // Opens the phone's native share menu with a message for the current beat.
   const shareBeat = async () => {
     try {
       await Share.share({
@@ -621,6 +645,9 @@ type FilterSheetProps = {
   onApply: (genre: string, sort: SortMode) => void;
 };
 
+/**
+ * Displays the bottom-sheet filter menu for choosing a genre and feed sorting mode.
+ */
 function FilterSheet({
   visible,
   currentGenre,
@@ -631,6 +658,7 @@ function FilterSheet({
   const [draftGenre, setDraftGenre] = useState(currentGenre);
   const [draftSort, setDraftSort] = useState<SortMode>(currentSort);
 
+  // Restores the temporary filter choices to the currently applied values whenever the sheet opens.
   const resetDrafts = () => {
     setDraftGenre(currentGenre);
     setDraftSort(currentSort);
@@ -730,31 +758,36 @@ function FilterSheet({
   );
 }
 
+/**
+ * Main Home tab for Bump.
+ * It prepares audio, filters and sorts beats, tracks the visible card, and renders the scrolling feed.
+ */
 export default function HomeScreen() {
-  
+  // Runs once when the Home screen loads to prepare audio playback and sampling.
+  useEffect(() => {
+    // Requests permission when required and sets the app's playback behaviour.
+    const prepareAudio = async () => {
+      if (Platform.OS === 'android') {
+        const permission = await requestRecordingPermissionsAsync();
 
-useEffect(() => {
-  const prepareAudio = async () => {
-    if (Platform.OS === 'android') {
-      const permission = await requestRecordingPermissionsAsync();
-
-      if (!permission.granted) {
-        Alert.alert(
-          'Audio visualiser permission',
-          'Permission is required on Android for the music-reactive waveform.',
-        );
+        if (!permission.granted) {
+          Alert.alert(
+            'Audio visualiser permission',
+            'Permission is required on Android for the music-reactive waveform.',
+          );
+        }
       }
-    }
 
-    await setAudioModeAsync({
-      playsInSilentMode: true,
-      interruptionMode: 'doNotMix',
-      shouldRouteThroughEarpiece: false,
-    });
-  };
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        interruptionMode: 'doNotMix',
+        shouldRouteThroughEarpiece: false,
+      });
+    };
 
-  void prepareAudio();
-}, []);
+    void prepareAudio();
+  }, []);
+
   const insets = useSafeAreaInsets();
 
   const [feedHeight, setFeedHeight] = useState(0);
@@ -764,6 +797,7 @@ useEffect(() => {
   const [sortMode, setSortMode] = useState<SortMode>('Recommended');
   const [filtersOpen, setFiltersOpen] = useState(false);
 
+  // Builds the feed from the selected tab, genre filter, and sorting option.
   const filteredBeats = useMemo(() => {
     let result =
       activeTab === 'following'
@@ -790,6 +824,7 @@ useEffect(() => {
     });
   }, [activeTab, genre, sortMode]);
 
+  // Updates `activeBeatId` whenever the user scrolls to a different full-screen beat.
   const onViewableItemsChanged = useRef(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const visibleItem = viewableItems.find(
