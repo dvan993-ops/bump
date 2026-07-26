@@ -796,6 +796,7 @@ export default function HomeScreen() {
   const [genre, setGenre] = useState('All');
   const [sortMode, setSortMode] = useState<SortMode>('Recommended');
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
 
   // Builds the feed from the selected tab, genre filter, and sorting option.
   const filteredBeats = useMemo(() => {
@@ -925,17 +926,35 @@ export default function HomeScreen() {
           </Pressable>
 
           <Pressable
-            onPress={() => setActiveTab('forYou')}
+            onPress={() => {
+              if (activeTab !== 'forYou') {
+                setActiveTab('forYou');
+                setSortMenuOpen(false);
+              } else {
+                setSortMenuOpen((open) => !open);
+              }
+            }}
             style={styles.feedTabButton}
           >
-            <Text
-              style={[
-                styles.feedTabText,
-                activeTab === 'forYou' && styles.activeFeedTabText,
-              ]}
-            >
-              For You
-            </Text>
+            <View style={styles.sortTabInner}>
+              <Text
+                style={[
+                  styles.feedTabText,
+                  activeTab === 'forYou' && styles.activeFeedTabText,
+                ]}
+              >
+                {sortMode}
+              </Text>
+              <Ionicons
+                name={sortMenuOpen ? 'chevron-up' : 'chevron-down'}
+                size={14}
+                color={
+                  activeTab === 'forYou'
+                    ? COLORS.white
+                    : 'rgba(255,255,255,0.66)'
+                }
+              />
+            </View>
             {activeTab === 'forYou' && <View style={styles.tabUnderline} />}
           </Pressable>
         </View>
@@ -954,6 +973,60 @@ export default function HomeScreen() {
           <Ionicons name="search" size={25} color={COLORS.white} />
         </Pressable>
       </View>
+
+      {sortMenuOpen && (
+        <>
+          <Pressable
+            style={styles.sortDropdownBackdrop}
+            onPress={() => setSortMenuOpen(false)}
+          />
+
+          <View
+            style={[
+              styles.sortDropdownWrapper,
+              { top: insets.top + 8 + 51 },
+            ]}
+          >
+            <View style={styles.sortDropdownCard}>
+              {(['Recommended', 'Trending', 'Recent'] as SortMode[]).map(
+                (option, index) => {
+                  const selected = sortMode === option;
+
+                  return (
+                    <Pressable
+                      key={option}
+                      onPress={() => {
+                        setSortMode(option);
+                        setSortMenuOpen(false);
+                      }}
+                      style={[
+                        styles.sortDropdownRow,
+                        index === 2 && styles.sortDropdownRowLast,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.sortDropdownText,
+                          selected && styles.sortDropdownTextActive,
+                        ]}
+                      >
+                        {option}
+                      </Text>
+                      {selected && (
+                        <Ionicons
+                          name="checkmark"
+                          size={18}
+                          color={COLORS.green}
+                        />
+                      )}
+                    </Pressable>
+                  );
+                },
+              )}
+            </View>
+          </View>
+        </>
+      )}
 
       <FilterSheet
         visible={filtersOpen}
@@ -1076,6 +1149,58 @@ const styles = StyleSheet.create({
     width: 27,
     borderRadius: 2,
     backgroundColor: COLORS.green,
+    alignSelf: 'center',
+  },
+  sortTabInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    minWidth: 120,
+  },
+  sortDropdownBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 24,
+  },
+  sortDropdownWrapper: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 25,
+  },
+  sortDropdownCard: {
+    width: 176,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  sortDropdownRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 15,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: COLORS.border,
+  },
+  sortDropdownRowLast: {
+    borderBottomWidth: 0,
+  },
+  sortDropdownText: {
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  sortDropdownTextActive: {
+    color: COLORS.green,
   },
   rightRail: {
     position: 'absolute',
