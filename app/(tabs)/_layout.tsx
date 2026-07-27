@@ -1,106 +1,52 @@
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { Tabs } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
+import { StyleSheet } from 'react-native';
+import PagerView from 'react-native-pager-view';
+
+import { CustomTabBar } from '@/components/custom-tab-bar';
+
+import ConnectScreen from './connect';
+import CreateScreen from './create';
+import HomeScreen from './index';
+import MatchScreen from './match';
+import ProfileScreen from './profile';
 
 const COLORS = {
   black: '#121212',
-  green: '#6fffb7',
-  grey: '#A7A7A7',
-  border: '#282828',
-  white: '#000000',
 };
 
 export default function TabLayout() {
+  const pagerRef = useRef<PagerView>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const handleTabPress = useCallback((index: number) => {
+    pagerRef.current?.setPage(index);
+  }, []);
+
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: COLORS.green,
-        tabBarInactiveTintColor: COLORS.grey,
-
-        tabBarStyle: {
-          backgroundColor: COLORS.black,
-          borderTopColor: COLORS.border,
-          borderTopWidth: 1,
-          height: 70,
-          paddingTop: 7,
-          paddingBottom: 8,
-        },
-
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '600',
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'home' : 'home-outline'}
-              size={25}
-              color={color}
-            />
-          ),
+    <>
+      <PagerView
+        ref={pagerRef}
+        style={styles.pager}
+        initialPage={0}
+        onPageSelected={(event) => {
+          setActiveIndex(event.nativeEvent.position);
         }}
-      />
+      >
+        <HomeScreen key="index" />
+        <MatchScreen key="match" />
+        <CreateScreen key="create" />
+        <ConnectScreen key="connect" />
+        <ProfileScreen key="profile" />
+      </PagerView>
 
-      <Tabs.Screen
-        name="match"
-        options={{
-          title: 'Match',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'flame' : 'flame-outline'}
-              size={26}
-              color={color}
-            />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="create"
-        options={{
-          title: 'Create',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'add-circle' : 'add-circle-outline'}
-              size={34}
-              color={color}
-            />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="connect"
-        options={{
-          title: 'Connect',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'chatbubbles' : 'chatbubbles-outline'}
-              size={25}
-              color={color}
-            />
-          ),
-        }}
-      />
-
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'person' : 'person-outline'}
-              size={25}
-              color={color}
-            />
-          ),
-        }}
-      />
-    </Tabs>
+      <CustomTabBar activeIndex={activeIndex} onTabPress={handleTabPress} />
+    </>
   );
 }
+
+const styles = StyleSheet.create({
+  pager: {
+    flex: 1,
+    backgroundColor: COLORS.black,
+  },
+});
