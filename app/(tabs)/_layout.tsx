@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { Tabs } from 'expo-router';
 
 const COLORS = {
@@ -50,13 +51,13 @@ export default function TabLayout() {
         name="match"
         options={{
           title: 'Match',
-          tabBarIcon: ({ color, focused }) => (
-            <Ionicons
-              name={focused ? 'flame' : 'flame-outline'}
-              size={26}
-              color={color}
-            />
-          ),
+          tabBarIcon: ({ color, size, focused }) => (
+         <MaterialCommunityIcons
+          name={focused ? 'handshake' : 'handshake-outline'}
+          size={size}
+           color={color}
+  />
+),
         }}
       />
 
