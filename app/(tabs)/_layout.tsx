@@ -12,7 +12,7 @@ import ProfileScreen from './profile';
 
 const COLORS = {
   black: '#121212',
-};
+} ;
 
 export default function TabLayout() {
   const pagerRef = useRef<PagerView>(null);
