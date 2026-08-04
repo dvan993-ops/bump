@@ -405,7 +405,6 @@ type BeatCardProps = {
  * It manages playback, visualizer data, likes, following, ratings, sharing, and beat details.
  */
 function BeatCard({ beat, height, active }: BeatCardProps) {
-  const [liked, setLiked] = useState(false);
   const [following, setFollowing] = useState(beat.followed);
   const [paused, setPaused] = useState(false);
   const [userRating, setUserRating] = useState(0);
@@ -604,13 +603,6 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
               </View>
             )}
           </Pressable>
-
-          <RailButton
-            icon={liked ? "heart" : "heart-outline"}
-            label={formatCount(beat.likes + (liked ? 1 : 0))}
-            active={liked}
-            onPress={() => setLiked((current) => !current)}
-          />
 
           <RailButton
             icon="chatbubble-ellipses-outline"
