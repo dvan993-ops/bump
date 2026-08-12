@@ -1,5 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 
+import { ThoughtsSheet, type Thought } from "@/components/thoughts-sheet";
 import {
   BlurMask,
   Canvas,
@@ -140,6 +141,71 @@ const BEATS: Beat[] = [
 ];
 
 const GENRES = ["All", "Trap", "Drill", "R&B", "Hip-Hop"];
+
+const MOCK_THOUGHTS: Record<string, Thought[]> = {
+  "1": [
+    {
+      id: "t1-1",
+      user: "ravengrey",
+      text: "That F# minor progression is haunting, this needs a raspy female vocal on it.",
+      minutesAgo: 12,
+    },
+    {
+      id: "t1-2",
+      user: "jayblnk",
+      text: "Drums hit different around the 0:40 mark, whoever mixed this knew what they were doing.",
+      minutesAgo: 47,
+    },
+    {
+      id: "t1-3",
+      user: "lunaroots",
+      text: "Reminds me of early Travis Scott but darker. Would love a slower flow over this.",
+      minutesAgo: 130,
+    },
+  ],
+  "2": [
+    {
+      id: "t2-1",
+      user: "drilltalk_nyc",
+      text: "The bounce on this is insane, perfect for a UK-style flow.",
+      minutesAgo: 8,
+    },
+    {
+      id: "t2-2",
+      user: "kairofan22",
+      text: "Kairo never misses honestly. This is going in my playlist regardless of vocals.",
+      minutesAgo: 55,
+    },
+  ],
+  "3": [
+    {
+      id: "t3-1",
+      user: "smoothrnb",
+      text: "This is exactly the vibe I've been looking for. Sending to my singer right now.",
+      minutesAgo: 5,
+    },
+    {
+      id: "t3-2",
+      user: "oceanwave_prod",
+      text: "The chord voicing in the bridge is so smooth, love the space you left for vocals.",
+      minutesAgo: 21,
+    },
+    {
+      id: "t3-3",
+      user: "nightowl_a",
+      text: "Feels like a late night drive through the city. Beautiful work.",
+      minutesAgo: 200,
+    },
+  ],
+  "4": [
+    {
+      id: "t4-1",
+      user: "hiphopheadz",
+      text: "That switch caught me off guard, in the best way possible.",
+      minutesAgo: 33,
+    },
+  ],
+};
 
 /**
  * Converts large numbers into short labels for the UI.
@@ -343,6 +409,24 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
   const [paused, setPaused] = useState(false);
   const [userRating, setUserRating] = useState(0);
   const [hasReceivedSamples, setHasReceivedSamples] = useState(false);
+  const [thoughts, setThoughts] = useState<Thought[]>(
+    () => MOCK_THOUGHTS[beat.id] ?? [],
+  );
+  const [thoughtCount, setThoughtCount] = useState(beat.comments);
+  const [thoughtsOpen, setThoughtsOpen] = useState(false);
+
+  // Adds a new thought to the top of the list and bumps the displayed count.
+  const addThought = (text: string) => {
+    const newThought: Thought = {
+      id: `${beat.id}-${Date.now()}`,
+      user: "you",
+      text,
+      minutesAgo: 0,
+    };
+
+    setThoughts((previous) => [newThought, ...previous]);
+    setThoughtCount((count) => count + 1);
+  };
 
   const player = useAudioPlayer(TEST_BEAT, {
     updateInterval: 100,
@@ -522,10 +606,8 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 
           <RailButton
             icon="chatbubble-ellipses-outline"
-            label={formatCount(beat.comments)}
-            onPress={() =>
-              Alert.alert("Comments", "The comments panel will be added later.")
-            }
+            label={formatCount(thoughtCount)}
+            onPress={() => setThoughtsOpen(true)}
           />
 
           <RailButton
@@ -608,6 +690,14 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 
         <DraggableRating value={userRating} onChange={setUserRating} />
       </View>
+
+      <ThoughtsSheet
+        visible={thoughtsOpen}
+        beatTitle={beat.title}
+        thoughts={thoughts}
+        onClose={() => setThoughtsOpen(false)}
+        onSubmit={addThought}
+      />
     </View>
   );
 }
