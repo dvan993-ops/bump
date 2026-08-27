@@ -3,6 +3,7 @@ import { StyleSheet } from 'react-native';
 import PagerView from 'react-native-pager-view';
 
 import { CustomTabBar } from '@/components/custom-tab-bar';
+import { TabFocusProvider } from '@/components/tab-focus';
 
 import ConnectScreen from './connect';
 import CreateScreen from './create';
@@ -23,7 +24,9 @@ export default function TabLayout() {
   }, []);
 
   return (
-    <>
+    // Every page stays mounted, so screens that play audio need to know which
+    // one is actually on screen. Without this, Home and Match play at once.
+    <TabFocusProvider index={activeIndex}>
       <PagerView
         ref={pagerRef}
         style={styles.pager}
@@ -40,7 +43,7 @@ export default function TabLayout() {
       </PagerView>
 
       <CustomTabBar activeIndex={activeIndex} onTabPress={handleTabPress} />
-    </>
+    </TabFocusProvider>
   );
 }
 

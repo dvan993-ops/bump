@@ -1,5 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 
+import { TAB_INDEX, useIsTabFocused } from "@/components/tab-focus";
 import { ThoughtsSheet, type Thought } from "@/components/thoughts-sheet";
 import {
   BlurMask,
@@ -853,6 +854,10 @@ export default function HomeScreen() {
 
   const insets = useSafeAreaInsets();
 
+  // Every tab stays mounted, so the feed has to stop when you swipe away —
+  // otherwise Home keeps playing underneath Match.
+  const focused = useIsTabFocused(TAB_INDEX.home);
+
   const [feedHeight, setFeedHeight] = useState(0);
   const [activeBeatId, setActiveBeatId] = useState(BEATS[0].id);
   const [activeTab, setActiveTab] = useState<FeedTab>("forYou");
@@ -917,14 +922,14 @@ export default function HomeScreen() {
       {feedHeight > 0 && (
         <FlatList
           data={filteredBeats}
-          extraData={activeBeatId}
+          extraData={`${activeBeatId}-${focused}`}
           removeClippedSubviews={false}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <BeatCard
               beat={item}
               height={feedHeight}
-              active={item.id === activeBeatId}
+              active={focused && item.id === activeBeatId}
             />
           )}
           pagingEnabled
