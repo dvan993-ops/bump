@@ -7,9 +7,9 @@
  * you want to make something with this person.
  *
  * Gestures: vertical scrolling belongs to the feed, horizontal belongs to the
- * card. The pan responder only claims a touch once it leans sideways, so
- * flicking up to the next artist always wins. Either sideways direction bumps —
- * you pass on someone by scrolling on, not by flinging them away.
+ * card, and gesture-handler arbitrates between them natively. Either sideways
+ * direction bumps — you pass on someone by scrolling on, not by flinging them
+ * away.
  */
 
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -20,7 +20,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
-  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -28,6 +27,8 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AudioVisualizer } from '@/components/audio-visualizer';
 import { BumpIcon } from '@/components/bump-icon';
@@ -101,6 +102,7 @@ export function MatchCard({
   onShare,
 }: MatchCardProps) {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const { artist } = item;
 
   const [paused, setPaused] = useState(false);
@@ -181,6 +183,15 @@ export function MatchCard({
 
   const decidedRef = useRef(false);
 
+  const springBack = () => {
+    Animated.spring(translateX, {
+      toValue: 0,
+      useNativeDriver: true,
+      bounciness: 4,
+      speed: 16,
+    }).start();
+  };
+
   /**
    * Both directions bump. There is no swipe-to-skip: scrolling on to the next
    * artist is already how you pass on someone, and having a sideways gesture
@@ -207,49 +218,54 @@ export function MatchCard({
     });
   };
 
-  const panResponder = useMemo(
+  /**
+   * A gesture-handler pan rather than a PanResponder.
+   *
+   * A JS PanResponder has to win an argument with the feed's scroll view, and
+   * it loses: the scroll view claims the touch natively on the first ambiguous
+   * move and will not hand it back, so anything more than a dead-straight
+   * sideways swipe collapsed into a scroll. Gesture-handler arbitrates in the
+   * native layer instead, which is what `activeOffsetX` and `failOffsetY` are
+   * for — travel 14px sideways and the bump wins outright; only 26px of
+   * vertical travel *first* gives it up to the feed.
+   */
+  const panGesture = useMemo(
     () =>
-      PanResponder.create({
-        // Claim the touch as soon as it leans sideways. Low enough to feel
-        // immediate, still steep enough that a flick up to the next artist is
-        // never mistaken for a bump.
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          Math.abs(gesture.dx) > 6 &&
-          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.1,
-        onPanResponderMove: (_event, gesture) => {
-          translateX.setValue(gesture.dx);
-        },
-        onPanResponderRelease: (_event, gesture) => {
-          const flung = Math.abs(gesture.vx) > 0.3;
-          const past = Math.abs(gesture.dx) > threshold;
+      Gesture.Pan()
+        // Callbacks on the JS thread, so they can drive the same Animated
+        // value the rest of the card already uses.
+        .runOnJS(true)
+        .activeOffsetX([-14, 14])
+        .failOffsetY([-26, 26])
+        .onUpdate((event) => {
+          translateX.setValue(event.translationX);
+        })
+        .onEnd((event) => {
+          // Velocity here is px/second, not px/ms.
+          const flung = Math.abs(event.velocityX) > 350;
+          const past = Math.abs(event.translationX) > threshold;
 
           if (past || flung) {
             // On a fast flick the finger may barely have moved, so fall back
             // to the direction of travel.
-            const carry = Math.abs(gesture.dx) > 4 ? gesture.dx : gesture.vx;
+            const carry =
+              Math.abs(event.translationX) > 4
+                ? event.translationX
+                : event.velocityX;
 
             settle(carry >= 0 ? 1 : -1);
             return;
           }
 
-          Animated.spring(translateX, {
-            toValue: 0,
-            useNativeDriver: true,
-            bounciness: 4,
-            speed: 16,
-          }).start();
-        },
-        onPanResponderTerminate: () => {
-          Animated.spring(translateX, {
-            toValue: 0,
-            useNativeDriver: true,
-            bounciness: 4,
-            speed: 16,
-          }).start();
-        },
-      }),
-    // `settle` closes over the current item, so the responder is rebuilt when
-    // the card changes. Cheap, and it keeps the callbacks correct.
+          springBack();
+        })
+        .onFinalize((_event, success) => {
+          if (!success && !decidedRef.current) {
+            springBack();
+          }
+        }),
+    // `settle` closes over the current item, so the gesture is rebuilt when the
+    // card changes. Cheap, and it keeps the callbacks correct.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [threshold, width, item.key],
   );
@@ -290,283 +306,291 @@ export function MatchCard({
       : city;
 
   return (
-    <Animated.View
-      {...panResponder.panHandlers}
-      style={[
-        styles.card,
-        { height, transform: [{ translateX }, { rotate }] },
-      ]}
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={paused ? 'Play preview' : 'Pause preview'}
-        onPress={() => setPaused((current) => !current)}
-        style={styles.background}
+    <GestureDetector gesture={panGesture}>
+      <Animated.View
+        style={[
+          styles.card,
+          { height, transform: [{ translateX }, { rotate }] },
+        ]}
       >
-        <AudioVisualizer
-          bars={bars}
-          width={waveWidth}
-          height={170}
-          color={accent}
-          style={styles.visualizer}
-        />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={paused ? 'Play preview' : 'Pause preview'}
+          onPress={() => setPaused((current) => !current)}
+          style={styles.background}
+        >
+          <AudioVisualizer
+            bars={bars}
+            width={waveWidth}
+            height={170}
+            color={accent}
+            style={styles.visualizer}
+          />
 
-        <Text style={styles.samplingStatus}>
-          {!supported
-            ? 'SAMPLING UNSUPPORTED'
-            : receiving
-              ? 'LIVE AUDIO'
-              : 'WAITING FOR AUDIO'}
-        </Text>
-
-        {/* The whole card is the play/pause target — see `background`. */}
-        {(paused || !active) && (
-          <View pointerEvents="none" style={styles.playSurface}>
-            <View style={styles.playBadge}>
-              <Ionicons name="play" size={48} color={BumpColors.white} />
-            </View>
-          </View>
-        )}
-
-        <LinearGradient
-          colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.94)']}
-          locations={[0, 0.45, 1]}
-          pointerEvents="none"
-          style={styles.bottomScrim}
-        />
-
-        {isCollab && (
-          <View pointerEvents="none" style={styles.collabBadge}>
-            <Ionicons name="git-merge" size={13} color={BumpColors.black} />
-            <Text style={styles.collabBadgeText}>Open collab</Text>
-          </View>
-        )}
-
-        {post.respondsTo && (
-          <View pointerEvents="none" style={styles.responseBadge}>
-            <Ionicons name="return-down-forward" size={13} color={accent} />
-            <Text style={styles.responseBadgeText} numberOfLines={1}>
-              on @{post.respondsTo.artistHandle} — {post.respondsTo.title}
-            </Text>
-          </View>
-        )}
-
-        {/* --- Right rail --- */}
-        <View pointerEvents="box-none" style={styles.rail}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Bump ${artist.handle}`}
-            hitSlop={TOUCH_SLOP}
-            onPress={() => settle(1)}
-            style={({ pressed }) => [
-              styles.bumpButton,
-              bumped && styles.bumpButtonDone,
-              pressed && styles.pressed,
-            ]}
-          >
-            <BumpIcon
-              size={30}
-              color={bumped ? BumpColors.black : BumpColors.mint}
-              creaseColor={bumped ? BumpColors.mint : BumpColors.black}
-              glow={!bumped}
-              sparks={bumped}
-            />
-          </Pressable>
-
-          <Text style={styles.bumpLabel}>
-            {bumped ? 'Bumped' : isCollab ? 'Bump collab' : 'Bump'}
+          <Text style={styles.samplingStatus}>
+            {!supported
+              ? 'SAMPLING UNSUPPORTED'
+              : receiving
+                ? 'LIVE AUDIO'
+                : 'WAITING FOR AUDIO'}
           </Text>
 
-          {isCollab && (
-            <RailButton
-              icon="download-outline"
-              label="Download"
-              tint={BumpColors.mint}
-              onPress={() => onRespondToCollab(item)}
-            />
+          {/* The whole card is the play/pause target — see `background`. */}
+          {(paused || !active) && (
+            <View pointerEvents="none" style={styles.playSurface}>
+              <View style={styles.playBadge}>
+                <Ionicons name="play" size={48} color={BumpColors.white} />
+              </View>
+            </View>
           )}
 
-          <RailButton
-            icon="albums-outline"
-            label={String(artist.posts.length)}
-            onPress={() => onOpenProfile(item)}
+          <LinearGradient
+            colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.94)']}
+            locations={[0, 0.45, 1]}
+            pointerEvents="none"
+            style={styles.bottomScrim}
           />
 
-          <RailButton
-            icon="arrow-redo-outline"
-            label={formatCount(post.bumps)}
-            onPress={() => onShare(item)}
-          />
-        </View>
+          {/* Sits clear of the screen's own header bar, whatever the inset. */}
+          <View
+            pointerEvents="none"
+            style={[styles.badgeColumn, { top: insets.top + 62 }]}
+          >
+            {isCollab && (
+              <View style={styles.collabBadge}>
+                <Ionicons name="git-merge" size={13} color={BumpColors.black} />
+                <Text style={styles.collabBadgeText}>Open collab</Text>
+              </View>
+            )}
 
-        {/* --- Info block --- */}
-        <View pointerEvents="box-none" style={styles.info}>
-          <View pointerEvents="box-none" style={styles.identityRow}>
+            {post.respondsTo && (
+              <View style={styles.responseBadge}>
+                <Ionicons name="return-down-forward" size={13} color={accent} />
+                <Text style={styles.responseBadgeText} numberOfLines={1}>
+                  on @{post.respondsTo.artistHandle} — {post.respondsTo.title}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* --- Right rail --- */}
+          <View pointerEvents="box-none" style={styles.rail}>
             <Pressable
               accessibilityRole="button"
-              onPress={() => onOpenProfile(item)}
+              accessibilityLabel={`Bump ${artist.handle}`}
               hitSlop={TOUCH_SLOP}
+              onPress={() => settle(1)}
+              style={({ pressed }) => [
+                styles.bumpButton,
+                bumped && styles.bumpButtonDone,
+                pressed && styles.pressed,
+              ]}
             >
-              <ArtistAvatar
-                handle={artist.handle}
-                name={artist.name}
-                size={38}
-                ring={artist.bumpedYou ? BumpColors.mint : BumpColors.white}
+              <BumpIcon
+                size={30}
+                color={bumped ? BumpColors.black : BumpColors.mint}
+                creaseColor={bumped ? BumpColors.mint : BumpColors.black}
+                glow={!bumped}
+                sparks={bumped}
               />
             </Pressable>
 
-            <View style={styles.identityText}>
-              <Text style={styles.handle} numberOfLines={1}>
-                @{artist.handle}
-              </Text>
-              <Text style={styles.meta} numberOfLines={1}>
-                {meta}
-              </Text>
-            </View>
+            <Text style={styles.bumpLabel}>
+              {bumped ? 'Bumped' : isCollab ? 'Bump collab' : 'Bump'}
+            </Text>
 
-            <Pressable
-              accessibilityRole="button"
-              hitSlop={TOUCH_SLOP}
-              onPress={() => onToggleFollow(artist.id)}
-              style={[
-                styles.followButton,
-                following && styles.followingButton,
-              ]}
-            >
-              <Text
+            {isCollab && (
+              <RailButton
+                icon="download-outline"
+                label="Download"
+                tint={BumpColors.mint}
+                onPress={() => onRespondToCollab(item)}
+              />
+            )}
+
+            <RailButton
+              icon="albums-outline"
+              label={String(artist.posts.length)}
+              onPress={() => onOpenProfile(item)}
+            />
+
+            <RailButton
+              icon="arrow-redo-outline"
+              label={formatCount(post.bumps)}
+              onPress={() => onShare(item)}
+            />
+          </View>
+
+          {/* --- Info block --- */}
+          <View pointerEvents="box-none" style={styles.info}>
+            <View pointerEvents="box-none" style={styles.identityRow}>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => onOpenProfile(item)}
+                hitSlop={TOUCH_SLOP}
+              >
+                <ArtistAvatar
+                  handle={artist.handle}
+                  name={artist.name}
+                  size={38}
+                  ring={artist.bumpedYou ? BumpColors.mint : BumpColors.white}
+                />
+              </Pressable>
+
+              <View style={styles.identityText}>
+                <Text style={styles.handle} numberOfLines={1}>
+                  @{artist.handle}
+                </Text>
+                <Text style={styles.meta} numberOfLines={1}>
+                  {meta}
+                </Text>
+              </View>
+
+              <Pressable
+                accessibilityRole="button"
+                hitSlop={TOUCH_SLOP}
+                onPress={() => onToggleFollow(artist.id)}
                 style={[
-                  styles.followText,
-                  following && styles.followingText,
+                  styles.followButton,
+                  following && styles.followingButton,
                 ]}
               >
-                {following ? 'Following' : 'Follow'}
-              </Text>
-            </Pressable>
-          </View>
-
-          <View pointerEvents="box-none" style={styles.lookingRow}>
-            <View style={styles.lookingChip}>
-              <Ionicons name="search" size={11} color={BumpColors.mint} />
-              <Text style={styles.lookingText}>{artist.lookingFor}</Text>
+                <Text
+                  style={[styles.followText, following && styles.followingText]}
+                >
+                  {following ? 'Following' : 'Follow'}
+                </Text>
+              </Pressable>
             </View>
 
-            <View style={styles.placeChip}>
-              <Ionicons
-                name="location-outline"
-                size={11}
-                color={BumpColors.grey}
-              />
-              <Text style={styles.reasonText}>{place}</Text>
-            </View>
-
-            {item.reasons.slice(0, 1).map((reason) => (
-              <View key={reason} style={styles.reasonChip}>
-                <Text style={styles.reasonText}>{reason}</Text>
+            <View pointerEvents="box-none" style={styles.lookingRow}>
+              <View style={styles.lookingChip}>
+                <Ionicons name="search" size={11} color={BumpColors.mint} />
+                <Text style={styles.lookingText}>{artist.lookingFor}</Text>
               </View>
-            ))}
-          </View>
 
-          <Text style={styles.postTitle} numberOfLines={1}>
-            {post.title}
-          </Text>
+              <View style={styles.placeChip}>
+                <Ionicons
+                  name="location-outline"
+                  size={11}
+                  color={BumpColors.grey}
+                />
+                <Text style={styles.reasonText}>{place}</Text>
+              </View>
 
-          {isCollab && (
-            <Text style={styles.ask} numberOfLines={2}>
-              {post.openCollabAsk}
+              {item.reasons.slice(0, 1).map((reason) => (
+                <View key={reason} style={styles.reasonChip}>
+                  <Text style={styles.reasonText}>{reason}</Text>
+                </View>
+              ))}
+            </View>
+
+            <Text style={styles.postTitle} numberOfLines={1}>
+              {post.title}
             </Text>
-          )}
 
-          <Text style={styles.trackMeta} numberOfLines={1}>
-            {post.genre} · {post.bpm} BPM · {post.musicalKey} ·{' '}
-            {post.durationLabel}
-          </Text>
+            {isCollab && (
+              <Text style={styles.ask} numberOfLines={2}>
+                {post.openCollabAsk}
+              </Text>
+            )}
 
-          <View style={styles.progressTrack}>
-            <View
-              style={[
-                styles.progressFill,
-                { width: progressWidth, backgroundColor: accent },
-              ]}
-            />
-          </View>
+            <Text style={styles.trackMeta} numberOfLines={1}>
+              {post.genre} · {post.bpm} BPM · {post.musicalKey} ·{' '}
+              {post.durationLabel}
+            </Text>
 
-          {artist.posts.length > 1 && (
-            <View style={styles.postChips}>
-              {artist.posts.slice(0, 4).map((option, index) => {
-                const selected = index === postIndex;
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  { width: progressWidth, backgroundColor: accent },
+                ]}
+              />
+            </View>
 
-                return (
-                  <Pressable
-                    key={option.id}
-                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
-                    onPress={() => {
-                      onSelectPost(artist.id, option.id);
-                      setPaused(false);
-                      tap(Haptics.ImpactFeedbackStyle.Light);
-                    }}
-                    style={[
-                      styles.postChip,
-                      selected && styles.postChipSelected,
-                    ]}
-                  >
-                    <Ionicons
-                      name={
-                        option.openCollabAsk ? 'git-merge' : 'musical-notes'
-                      }
-                      size={11}
-                      color={selected ? BumpColors.black : BumpColors.grey}
-                    />
-                    <Text
-                      numberOfLines={1}
+            {artist.posts.length > 1 && (
+              <View style={styles.postChips}>
+                {artist.posts.slice(0, 4).map((option, index) => {
+                  const selected = index === postIndex;
+
+                  return (
+                    <Pressable
+                      key={option.id}
+                      hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+                      onPress={() => {
+                        onSelectPost(artist.id, option.id);
+                        setPaused(false);
+                        tap(Haptics.ImpactFeedbackStyle.Light);
+                      }}
                       style={[
-                        styles.postChipText,
-                        selected && styles.postChipTextSelected,
+                        styles.postChip,
+                        selected && styles.postChipSelected,
                       ]}
                     >
-                      {option.title}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
+                      <Ionicons
+                        name={
+                          option.openCollabAsk ? 'git-merge' : 'musical-notes'
+                        }
+                        size={11}
+                        color={selected ? BumpColors.black : BumpColors.grey}
+                      />
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          styles.postChipText,
+                          selected && styles.postChipTextSelected,
+                        ]}
+                      >
+                        {option.title}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
 
-          {showHint && (
-            <View style={styles.hintRow}>
-              <Ionicons
-                name="arrow-forward"
-                size={12}
-                color={BumpColors.muted}
-              />
-              <Text style={styles.hintText}>
-                Swipe either way to bump · up for the next artist
-              </Text>
-            </View>
-          )}
-        </View>
+            {showHint && (
+              <View style={styles.hintRow}>
+                <Ionicons
+                  name="arrow-forward"
+                  size={12}
+                  color={BumpColors.muted}
+                />
+                <Text style={styles.hintText}>
+                  Swipe either way to bump · up for the next artist
+                </Text>
+              </View>
+            )}
+          </View>
 
-        {/* --- Swipe stamps. Either direction bumps. --- */}
-        <Animated.View
-          pointerEvents="none"
-          style={[styles.stamp, styles.stampLeft, { opacity: stampLeftOpacity }]}
-        >
-          <BumpIcon size={26} color={BumpColors.mint} sparks />
-          <Text style={styles.stampText}>BUMP</Text>
-        </Animated.View>
+          {/* --- Swipe stamps. Either direction bumps. --- */}
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.stamp,
+              styles.stampLeft,
+              { opacity: stampLeftOpacity },
+            ]}
+          >
+            <BumpIcon size={26} color={BumpColors.mint} sparks />
+            <Text style={styles.stampText}>BUMP</Text>
+          </Animated.View>
 
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            styles.stamp,
-            styles.stampRight,
-            { opacity: stampRightOpacity },
-          ]}
-        >
-          <BumpIcon size={26} color={BumpColors.mint} sparks />
-          <Text style={styles.stampText}>BUMP</Text>
-        </Animated.View>
-      </Pressable>
-    </Animated.View>
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.stamp,
+              styles.stampRight,
+              { opacity: stampRightOpacity },
+            ]}
+          >
+            <BumpIcon size={26} color={BumpColors.mint} sparks />
+            <Text style={styles.stampText}>BUMP</Text>
+          </Animated.View>
+        </Pressable>
+      </Animated.View>
+    </GestureDetector>
   );
 }
 
@@ -653,11 +677,16 @@ const styles = StyleSheet.create({
     zIndex: 2,
   },
 
-  collabBadge: {
+  badgeColumn: {
     position: 'absolute',
-    top: 74,
     left: 16,
+    right: 90,
     zIndex: 6,
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+
+  collabBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
@@ -676,14 +705,10 @@ const styles = StyleSheet.create({
   },
 
   responseBadge: {
-    position: 'absolute',
-    top: 110,
-    left: 16,
-    right: 90,
-    zIndex: 6,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
+    maxWidth: '100%',
   },
 
   responseBadgeText: {

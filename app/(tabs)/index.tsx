@@ -1343,7 +1343,10 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 15,
     right: 82,
-    bottom: 94,
+    // Clears the rating panel below it: that panel sits 14px off the bottom and
+    // stands roughly 91px tall, so anything under ~110 puts the progress bar
+    // behind it.
+    bottom: 118,
     zIndex: 5,
   },
   producerRow: {
