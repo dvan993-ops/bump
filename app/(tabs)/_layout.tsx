@@ -31,6 +31,10 @@ export default function TabLayout() {
         ref={pagerRef}
         style={styles.pager}
         initialPage={0}
+        // Tabs are changed by tapping the tab bar, never by swiping. Horizontal
+        // drags belong to the cards in Match — swiping to Bump and swiping
+        // between tabs cannot share the same gesture.
+        scrollEnabled={false}
         onPageSelected={(event) => {
           setActiveIndex(event.nativeEvent.position);
         }}

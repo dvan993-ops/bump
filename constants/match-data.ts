@@ -669,49 +669,6 @@ export const ARTISTS: Artist[] = [
   },
 ];
 
-/**
- * The viewer's own posts, offered when they respond to an Open Collab.
- * In production this is their library; here it is enough to show the loop.
- */
-export const YOUR_TRACKS: MatchPost[] = [
-  {
-    id: 'y1',
-    title: 'Untitled Idea 04',
-    previewStart: 100,
-    durationLabel: '0:18',
-    genre: 'Trap',
-    bpm: 148,
-    musicalKey: 'F# Minor',
-    plays: 0,
-    bumps: 0,
-    createdAt: '2026-08-26T22:10:00Z',
-  },
-  {
-    id: 'y2',
-    title: 'Drill Loop (140)',
-    previewStart: 120,
-    durationLabel: '0:15',
-    genre: 'Drill',
-    bpm: 140,
-    musicalKey: 'D Minor',
-    plays: 320,
-    bumps: 28,
-    createdAt: '2026-08-23T11:00:00Z',
-  },
-  {
-    id: 'y3',
-    title: 'Late Chords',
-    previewStart: 132,
-    durationLabel: '0:20',
-    genre: 'R&B',
-    bpm: 92,
-    musicalKey: 'A Minor',
-    plays: 1180,
-    bumps: 94,
-    createdAt: '2026-08-18T19:40:00Z',
-  },
-];
-
 /** Every post that is marked as an Open Collab, paired with its artist. */
 export function openCollabs(
   artists: Artist[] = ARTISTS,

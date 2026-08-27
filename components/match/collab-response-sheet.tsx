@@ -1,38 +1,33 @@
 /**
- * Instant Collab Preview.
+ * Open Collab details.
  *
- * Someone posted an Open Collab; this is where you answer it. Pick one of your
- * own tracks (or record a part), see the two stacked as one preview, and send
- * it. The response becomes its own short-form Bump post that links back to the
- * original — which is the loop: post, get discovered, get answered, both of you
- * get discovered again.
+ * Everything you need in order to decide whether to take the collab, and then
+ * the file itself. The work happens in your DAW, not in the app — so this sheet
+ * shows the ask and the track's specs, and hands you the audio.
  */
 
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect, useState } from 'react';
 import {
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 
 import { AudioVisualizer } from '@/components/audio-visualizer';
-import { BumpColors } from '@/constants/bump-theme';
-import {
-  YOUR_TRACKS,
-  type Artist,
-  type MatchPost,
-} from '@/constants/match-data';
+import { ArtistAvatar } from '@/components/match/artist-avatar';
+import { BumpColors, formatCount } from '@/constants/bump-theme';
+import type { Artist, MatchPost } from '@/constants/match-data';
+
+export type DownloadFormat = 'wav' | 'mp3';
 
 /**
- * Deterministic bars for the stacked preview. The real thing would read the
- * rendered mix; this keeps the layout honest without inventing audio.
+ * Deterministic bars for the still preview. The real thing would read the
+ * rendered waveform; this keeps the layout honest without inventing audio.
  */
-function previewBars(seed: string, count = 26, ceiling = 34): number[] {
+function previewBars(seed: string, count = 34, ceiling = 44): number[] {
   let hash = 0;
 
   for (let index = 0; index < seed.length; index += 1) {
@@ -42,11 +37,58 @@ function previewBars(seed: string, count = 26, ceiling = 34): number[] {
   return Array.from({ length: count }, (_, index) => {
     hash = (hash * 1103515245 + 12345) % 2147483648;
 
-    const wave = 0.55 + 0.45 * Math.sin((index / count) * Math.PI * 3);
+    const envelope = 0.55 + 0.45 * Math.sin((index / count) * Math.PI * 3);
     const noise = (hash % 1000) / 1000;
 
-    return 6 + wave * noise * ceiling;
+    return 5 + envelope * noise * ceiling;
   });
+}
+
+function durationSeconds(label: string): number {
+  const [minutes, seconds] = label.split(':').map(Number);
+
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) {
+    return 0;
+  }
+
+  return minutes * 60 + seconds;
+}
+
+/**
+ * Rough download size from the duration.
+ * WAV at 44.1 kHz / 16-bit / stereo is 176.4 KB per second; MP3 at 320 kbps
+ * is 40 KB per second.
+ */
+function sizeLabel(label: string, format: DownloadFormat): string {
+  const seconds = durationSeconds(label);
+
+  if (seconds === 0) {
+    return '—';
+  }
+
+  const megabytes = (seconds * (format === 'wav' ? 176.4 : 40)) / 1024;
+
+  return `${megabytes < 10 ? megabytes.toFixed(1) : Math.round(megabytes)} MB`;
+}
+
+function postedLabel(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+
+  if (days <= 0) {
+    return 'Today';
+  }
+
+  if (days === 1) {
+    return 'Yesterday';
+  }
+
+  if (days < 7) {
+    return `${days} days ago`;
+  }
+
+  const weeks = Math.floor(days / 7);
+
+  return `${weeks} ${weeks === 1 ? 'week' : 'weeks'} ago`;
 }
 
 export type CollabResponseSheetProps = {
@@ -54,11 +96,10 @@ export type CollabResponseSheetProps = {
   artist: Artist | null;
   post: MatchPost | null;
   onClose: () => void;
-  onSend: (options: {
+  onDownload: (options: {
     artist: Artist;
     post: MatchPost;
-    responseTrackId: string | null;
-    note: string;
+    format: DownloadFormat;
   }) => void;
 };
 
@@ -67,24 +108,20 @@ export function CollabResponseSheet({
   artist,
   post,
   onClose,
-  onSend,
+  onDownload,
 }: CollabResponseSheetProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [note, setNote] = useState('');
-
-  useEffect(() => {
-    if (visible) {
-      setSelectedId(null);
-      setNote('');
-    }
-  }, [visible]);
-
   if (!artist || !post) {
     return null;
   }
 
-  const selected = YOUR_TRACKS.find((track) => track.id === selectedId) ?? null;
-  const canSend = selected !== null;
+  const specs = [
+    { label: 'Genre', value: post.genre },
+    { label: 'Tempo', value: `${post.bpm} BPM` },
+    { label: 'Key', value: post.musicalKey },
+    { label: 'Length', value: post.durationLabel },
+    { label: 'Plays', value: formatCount(post.plays) },
+    { label: 'Posted', value: postedLabel(post.createdAt) },
+  ];
 
   return (
     <Modal
@@ -100,10 +137,19 @@ export function CollabResponseSheet({
           <View style={styles.handle} />
 
           <View style={styles.header}>
+            <ArtistAvatar
+              handle={artist.handle}
+              name={artist.name}
+              size={44}
+              ring={BumpColors.mint}
+            />
+
             <View style={styles.headerText}>
-              <Text style={styles.title}>Add your part</Text>
-              <Text style={styles.subtitle} numberOfLines={2}>
-                @{artist.handle} · {post.openCollabAsk}
+              <Text style={styles.title} numberOfLines={1}>
+                {post.title}
+              </Text>
+              <Text style={styles.byline} numberOfLines={1}>
+                @{artist.handle} · {artist.role}
               </Text>
             </View>
 
@@ -121,173 +167,108 @@ export function CollabResponseSheet({
             showsVerticalScrollIndicator={false}
             contentContainerStyle={styles.scroll}
           >
-            {/* The stack: their track on top, yours underneath. */}
-            <View style={styles.stack}>
-              <StackLayer
-                label={`@${artist.handle} — ${post.title}`}
-                sublabel={`${post.bpm} BPM · ${post.musicalKey}`}
-                color={BumpColors.green}
-                seed={post.id}
-              />
-
-              <View style={styles.stackJoin}>
-                <View style={styles.stackLine} />
-                <Ionicons name="add" size={15} color={BumpColors.muted} />
-                <View style={styles.stackLine} />
+            <View style={styles.askCard}>
+              <View style={styles.askHeader}>
+                <Ionicons
+                  name="git-merge"
+                  size={13}
+                  color={BumpColors.black}
+                />
+                <Text style={styles.askHeaderText}>Open collab</Text>
               </View>
 
-              {selected ? (
-                <StackLayer
-                  label={`You — ${selected.title}`}
-                  sublabel={`${selected.bpm} BPM · ${selected.musicalKey}`}
-                  color={BumpColors.mint}
-                  seed={selected.id}
-                  warn={
-                    selected.bpm !== post.bpm
-                      ? `${Math.abs(selected.bpm - post.bpm)} BPM apart`
-                      : undefined
-                  }
-                />
-              ) : (
-                <View style={styles.emptyLayer}>
-                  <Ionicons
-                    name="add-circle-outline"
-                    size={22}
-                    color={BumpColors.muted}
-                  />
-                  <Text style={styles.emptyLayerText}>
-                    Pick a track to lay over it
-                  </Text>
+              <Text style={styles.askText}>{post.openCollabAsk}</Text>
+
+              {post.wantedRoles && post.wantedRoles.length > 0 && (
+                <View style={styles.wantedRow}>
+                  {post.wantedRoles.map((role) => (
+                    <View key={role} style={styles.wantedChip}>
+                      <Text style={styles.wantedChipText}>{role}</Text>
+                    </View>
+                  ))}
                 </View>
               )}
             </View>
 
-            <Text style={styles.label}>Your tracks</Text>
-
-            <View style={styles.trackList}>
-              {YOUR_TRACKS.map((track) => {
-                const active = track.id === selectedId;
-
-                return (
-                  <Pressable
-                    key={track.id}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                    onPress={() => setSelectedId(active ? null : track.id)}
-                    style={[styles.track, active && styles.trackActive]}
-                  >
-                    <Ionicons
-                      name={active ? 'checkmark-circle' : 'ellipse-outline'}
-                      size={20}
-                      color={active ? BumpColors.mint : BumpColors.muted}
-                    />
-
-                    <View style={styles.trackText}>
-                      <Text style={styles.trackTitle} numberOfLines={1}>
-                        {track.title}
-                      </Text>
-                      <Text style={styles.trackMeta} numberOfLines={1}>
-                        {track.genre} · {track.bpm} BPM · {track.musicalKey} ·{' '}
-                        {track.durationLabel}
-                      </Text>
-                    </View>
-                  </Pressable>
-                );
-              })}
-
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => setSelectedId(null)}
-                style={styles.recordRow}
-              >
-                <Ionicons name="mic" size={19} color={BumpColors.mint} />
-                <Text style={styles.recordText}>Record something new</Text>
-                <Text style={styles.recordSoon}>Soon</Text>
-              </Pressable>
+            <View style={styles.waveCard}>
+              <AudioVisualizer
+                bars={previewBars(post.id)}
+                width={286}
+                height={52}
+                color={BumpColors.mint}
+                gap={2}
+                minHeight={4}
+                maxHeight={48}
+                glowBlur={5}
+              />
             </View>
 
-            <Text style={styles.label}>Note</Text>
+            <View style={styles.specs}>
+              {specs.map((spec) => (
+                <View key={spec.label} style={styles.spec}>
+                  <Text style={styles.specLabel}>{spec.label}</Text>
+                  <Text style={styles.specValue} numberOfLines={1}>
+                    {spec.value}
+                  </Text>
+                </View>
+              ))}
+            </View>
 
-            <TextInput
-              value={note}
-              onChangeText={setNote}
-              multiline
-              maxLength={200}
-              placeholder="What did you hear on it?"
-              placeholderTextColor={BumpColors.muted}
-              style={styles.noteInput}
-            />
-          </ScrollView>
+            <Text style={styles.label}>Download</Text>
 
-          <Pressable
-            accessibilityRole="button"
-            disabled={!canSend}
-            onPress={() =>
-              onSend({
-                artist,
-                post,
-                responseTrackId: selectedId,
-                note: note.trim(),
-              })
-            }
-            style={({ pressed }) => [
-              styles.send,
-              !canSend && styles.sendDisabled,
-              pressed && canSend && styles.sendPressed,
-            ]}
-          >
-            <Text style={[styles.sendText, !canSend && styles.sendTextDisabled]}>
-              {canSend ? 'Send response' : 'Pick a track first'}
+            <View style={styles.downloads}>
+              <DownloadButton
+                format="wav"
+                caption={`Lossless · ${sizeLabel(post.durationLabel, 'wav')}`}
+                onPress={() => onDownload({ artist, post, format: 'wav' })}
+              />
+
+              <DownloadButton
+                format="mp3"
+                caption={`320 kbps · ${sizeLabel(post.durationLabel, 'mp3')}`}
+                onPress={() => onDownload({ artist, post, format: 'mp3' })}
+              />
+            </View>
+
+            <Text style={styles.footnote}>
+              Take it into your DAW, then post what you make back to Bump — it
+              links to @{artist.handle}&apos;s original.
             </Text>
-          </Pressable>
+          </ScrollView>
         </View>
       </View>
     </Modal>
   );
 }
 
-function StackLayer({
-  label,
-  sublabel,
-  color,
-  seed,
-  warn,
+function DownloadButton({
+  format,
+  caption,
+  onPress,
 }: {
-  label: string;
-  sublabel: string;
-  color: string;
-  seed: string;
-  warn?: string;
+  format: DownloadFormat;
+  caption: string;
+  onPress: () => void;
 }) {
   return (
-    <View style={[styles.layer, { borderColor: color }]}>
-      <View style={styles.layerText}>
-        <Text style={styles.layerLabel} numberOfLines={1}>
-          {label}
-        </Text>
-        <Text style={styles.layerSub} numberOfLines={1}>
-          {sublabel}
-        </Text>
-      </View>
-
-      <AudioVisualizer
-        bars={previewBars(seed)}
-        width={132}
-        height={40}
-        color={color}
-        gap={2}
-        minHeight={4}
-        maxHeight={36}
-        glowBlur={4}
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Download ${format.toUpperCase()}`}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.download,
+        pressed && styles.downloadPressed,
+      ]}
+    >
+      <Ionicons
+        name="download-outline"
+        size={20}
+        color={BumpColors.mint}
+        style={styles.downloadIcon}
       />
-
-      {warn && (
-        <View style={styles.warn}>
-          <Ionicons name="alert-circle" size={11} color={BumpColors.black} />
-          <Text style={styles.warnText}>{warn}</Text>
-        </View>
-      )}
-    </View>
+      <Text style={styles.downloadFormat}>{format.toUpperCase()}</Text>
+      <Text style={styles.downloadCaption}>{caption}</Text>
+    </Pressable>
   );
 }
 
@@ -323,7 +304,7 @@ const styles = StyleSheet.create({
 
   header: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 12,
   },
 
@@ -333,15 +314,15 @@ const styles = StyleSheet.create({
 
   title: {
     color: BumpColors.white,
-    fontSize: 23,
+    fontSize: 21,
     fontWeight: '900',
   },
 
-  subtitle: {
+  byline: {
     color: BumpColors.grey,
     fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4,
+    fontWeight: '600',
+    marginTop: 2,
   },
 
   close: {
@@ -355,90 +336,106 @@ const styles = StyleSheet.create({
 
   scroll: {
     paddingTop: 18,
-    paddingBottom: 12,
+    paddingBottom: 8,
   },
 
-  stack: {
-    gap: 0,
-  },
-
-  layer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 12,
+  askCard: {
+    padding: 14,
     borderRadius: 16,
+    backgroundColor: BumpColors.mintWash,
     borderWidth: 1,
-    backgroundColor: BumpColors.surface,
+    borderColor: BumpColors.mintEdge,
   },
 
-  layerText: {
-    flex: 1,
-  },
-
-  layerLabel: {
-    color: BumpColors.white,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-
-  layerSub: {
-    color: BumpColors.grey,
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 2,
-  },
-
-  stackJoin: {
+  askHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 4,
+    alignSelf: 'flex-start',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: BumpColors.mint,
   },
 
-  stackLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: BumpColors.border,
-  },
-
-  emptyLayer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    height: 78,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: BumpColors.border,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-  },
-
-  emptyLayerText: {
-    color: BumpColors.muted,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-
-  warn: {
-    position: 'absolute',
-    top: -8,
-    right: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 8,
-    backgroundColor: '#FFB03A',
-  },
-
-  warnText: {
+  askHeaderText: {
     color: BumpColors.black,
     fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+
+  askText: {
+    color: BumpColors.white,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '600',
+    marginTop: 10,
+  },
+
+  wantedRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 12,
+  },
+
+  wantedChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+  },
+
+  wantedChipText: {
+    color: BumpColors.mint,
+    fontSize: 11,
     fontWeight: '800',
+  },
+
+  waveCard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 78,
+    marginTop: 14,
+    borderRadius: 16,
+    overflow: 'hidden',
+    backgroundColor: BumpColors.black,
+    borderWidth: 1,
+    borderColor: BumpColors.border,
+  },
+
+  specs: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 14,
+    borderRadius: 16,
+    backgroundColor: BumpColors.surface,
+    borderWidth: 1,
+    borderColor: BumpColors.border,
+    paddingVertical: 6,
+  },
+
+  spec: {
+    width: '33.33%',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+
+  specLabel: {
+    color: BumpColors.muted,
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+
+  specValue: {
+    color: BumpColors.white,
+    fontSize: 14,
+    fontWeight: '800',
+    marginTop: 3,
   },
 
   label: {
@@ -451,105 +448,48 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
 
-  trackList: {
-    gap: 8,
+  downloads: {
+    flexDirection: 'row',
+    gap: 10,
   },
 
-  track: {
-    flexDirection: 'row',
+  download: {
+    flex: 1,
     alignItems: 'center',
-    gap: 11,
-    padding: 12,
-    borderRadius: 15,
+    paddingVertical: 16,
+    borderRadius: 16,
     backgroundColor: BumpColors.surface,
     borderWidth: 1,
-    borderColor: BumpColors.border,
-  },
-
-  trackActive: {
     borderColor: BumpColors.mintEdge,
-    backgroundColor: BumpColors.mintWash,
   },
 
-  trackText: {
-    flex: 1,
+  downloadPressed: {
+    backgroundColor: BumpColors.raised,
+    transform: [{ scale: 0.985 }],
   },
 
-  trackTitle: {
+  downloadIcon: {
+    marginBottom: 4,
+  },
+
+  downloadFormat: {
     color: BumpColors.white,
-    fontSize: 14,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
 
-  trackMeta: {
+  downloadCaption: {
     color: BumpColors.grey,
     fontSize: 11,
     fontWeight: '600',
     marginTop: 2,
   },
 
-  recordRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    padding: 12,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: BumpColors.border,
-  },
-
-  recordText: {
-    flex: 1,
-    color: BumpColors.white,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-
-  recordSoon: {
+  footnote: {
     color: BumpColors.muted,
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-
-  noteInput: {
-    minHeight: 74,
-    borderRadius: 15,
-    padding: 13,
-    color: BumpColors.white,
-    fontSize: 14,
-    textAlignVertical: 'top',
-    backgroundColor: BumpColors.surface,
-    borderWidth: 1,
-    borderColor: BumpColors.border,
-  },
-
-  send: {
-    height: 52,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 26,
+    fontSize: 12,
+    lineHeight: 17,
     marginTop: 16,
-    backgroundColor: BumpColors.mint,
-  },
-
-  sendPressed: {
-    backgroundColor: BumpColors.mintPressed,
-    transform: [{ scale: 0.985 }],
-  },
-
-  sendDisabled: {
-    backgroundColor: BumpColors.raised,
-  },
-
-  sendText: {
-    color: BumpColors.black,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-
-  sendTextDisabled: {
-    color: BumpColors.muted,
   },
 });

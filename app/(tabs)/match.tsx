@@ -438,9 +438,11 @@ export default function MatchScreen() {
         artist={collabTarget?.artist ?? null}
         post={collabTarget?.post ?? null}
         onClose={() => setCollabTarget(null)}
-        onSend={({ artist }) => {
+        onDownload={({ post, format }) => {
           setCollabTarget(null);
-          comingSoon(`Sending your part to @${artist.handle}`);
+          comingSoon(
+            `Downloading "${post.title}" as ${format.toUpperCase()}`,
+          );
         }}
       />
 

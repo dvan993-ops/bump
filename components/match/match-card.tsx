@@ -371,8 +371,8 @@ export function MatchCard({
 
           {isCollab && (
             <RailButton
-              icon="mic-outline"
-              label="Add part"
+              icon="download-outline"
+              label="Download"
               tint={BumpColors.mint}
               onPress={() => onRespondToCollab(item)}
             />
