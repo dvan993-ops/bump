@@ -210,9 +210,12 @@ export function MatchCard({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
+        // Claim the touch as soon as it is clearly sideways. Low enough to feel
+        // responsive, still steep enough that a flick up to the next artist
+        // never gets mistaken for a bump.
         onMoveShouldSetPanResponder: (_event, gesture) =>
-          Math.abs(gesture.dx) > 14 &&
-          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.6,
+          Math.abs(gesture.dx) > 10 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2,
         onPanResponderMove: (_event, gesture) => {
           translateX.setValue(gesture.dx);
         },
