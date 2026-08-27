@@ -7,8 +7,9 @@
  * you want to make something with this person.
  *
  * Gestures: vertical scrolling belongs to the feed, horizontal belongs to the
- * card. The pan responder only claims a touch once it is clearly sideways, so
- * flicking up to the next artist always wins.
+ * card. The pan responder only claims a touch once it leans sideways, so
+ * flicking up to the next artist always wins. Either sideways direction bumps —
+ * you pass on someone by scrolling on, not by flinging them away.
  */
 
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -18,6 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
+  Easing,
   PanResponder,
   Platform,
   Pressable,
@@ -37,8 +39,11 @@ import type { FeedItem } from '@/lib/match-discovery';
 
 const PREVIEW_SOURCE = require('../../assets/audio/test-beat.wav');
 
-/** Fraction of the screen width a drag must cross to count as a decision. */
-const SWIPE_FRACTION = 0.26;
+/** Fraction of the screen width a drag must cross to count as a bump. */
+const SWIPE_FRACTION = 0.17;
+
+/** Generous touch padding — these are one-handed, in-motion targets. */
+const TOUCH_SLOP = { top: 10, bottom: 10, left: 12, right: 12 };
 
 /** Seconds to preview when a post has no parseable duration. */
 const FALLBACK_WINDOW = 20;
@@ -73,7 +78,6 @@ export type MatchCardProps = {
   /** Shows the swipe hint. Only the first card in the feed passes true. */
   showHint?: boolean;
   onBump: (item: FeedItem) => void;
-  onSkip: (item: FeedItem) => void;
   onToggleFollow: (artistId: string) => void;
   onOpenProfile: (item: FeedItem) => void;
   onSelectPost: (artistId: string, postId: string) => void;
@@ -90,7 +94,6 @@ export function MatchCard({
   selectedPostId,
   showHint = false,
   onBump,
-  onSkip,
   onToggleFollow,
   onOpenProfile,
   onSelectPost,
@@ -178,71 +181,70 @@ export function MatchCard({
 
   const decidedRef = useRef(false);
 
-  const settle = (direction: 'bump' | 'skip') => {
+  /**
+   * Both directions bump. There is no swipe-to-skip: scrolling on to the next
+   * artist is already how you pass on someone, and having a sideways gesture
+   * that throws them away made the one gesture that matters feel risky.
+   */
+  const settle = (direction: 1 | -1) => {
     if (decidedRef.current) {
       return;
     }
 
     decidedRef.current = true;
 
-    tap(
-      direction === 'bump'
-        ? Haptics.ImpactFeedbackStyle.Heavy
-        : Haptics.ImpactFeedbackStyle.Light,
-    );
+    tap(Haptics.ImpactFeedbackStyle.Heavy);
 
     Animated.timing(translateX, {
-      toValue: direction === 'bump' ? width * 1.2 : -width * 1.2,
-      duration: 210,
+      toValue: direction * width * 1.15,
+      duration: 190,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start(() => {
       translateX.setValue(0);
       decidedRef.current = false;
-
-      if (direction === 'bump') {
-        onBump(item);
-      } else {
-        onSkip(item);
-      }
+      onBump(item);
     });
   };
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        // Claim the touch as soon as it is clearly sideways. Low enough to feel
-        // responsive, still steep enough that a flick up to the next artist
-        // never gets mistaken for a bump.
+        // Claim the touch as soon as it leans sideways. Low enough to feel
+        // immediate, still steep enough that a flick up to the next artist is
+        // never mistaken for a bump.
         onMoveShouldSetPanResponder: (_event, gesture) =>
-          Math.abs(gesture.dx) > 10 &&
-          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2,
+          Math.abs(gesture.dx) > 6 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.1,
         onPanResponderMove: (_event, gesture) => {
           translateX.setValue(gesture.dx);
         },
         onPanResponderRelease: (_event, gesture) => {
-          const flung = Math.abs(gesture.vx) > 0.5;
+          const flung = Math.abs(gesture.vx) > 0.3;
           const past = Math.abs(gesture.dx) > threshold;
 
-          if ((past || flung) && gesture.dx > 0) {
-            settle('bump');
-            return;
-          }
+          if (past || flung) {
+            // On a fast flick the finger may barely have moved, so fall back
+            // to the direction of travel.
+            const carry = Math.abs(gesture.dx) > 4 ? gesture.dx : gesture.vx;
 
-          if ((past || flung) && gesture.dx < 0) {
-            settle('skip');
+            settle(carry >= 0 ? 1 : -1);
             return;
           }
 
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
-            bounciness: 6,
+            bounciness: 4,
+            speed: 16,
           }).start();
         },
         onPanResponderTerminate: () => {
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
+            bounciness: 4,
+            speed: 16,
           }).start();
         },
       }),
@@ -252,13 +254,15 @@ export function MatchCard({
     [threshold, width, item.key],
   );
 
-  const bumpStampOpacity = translateX.interpolate({
+  // Dragging right shows the stamp on the left, and the other way round, so
+  // the mark never sits under your thumb.
+  const stampLeftOpacity = translateX.interpolate({
     inputRange: [0, threshold],
     outputRange: [0, 1],
     extrapolate: 'clamp',
   });
 
-  const skipStampOpacity = translateX.interpolate({
+  const stampRightOpacity = translateX.interpolate({
     inputRange: [-threshold, 0],
     outputRange: [1, 0],
     extrapolate: 'clamp',
@@ -266,7 +270,7 @@ export function MatchCard({
 
   const rotate = translateX.interpolate({
     inputRange: [-width, 0, width],
-    outputRange: ['-7deg', '0deg', '7deg'],
+    outputRange: ['-5deg', '0deg', '5deg'],
   });
 
   // --- Layout ------------------------------------------------------------
@@ -293,7 +297,12 @@ export function MatchCard({
         { height, transform: [{ translateX }, { rotate }] },
       ]}
     >
-      <View style={styles.background}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={paused ? 'Play preview' : 'Pause preview'}
+        onPress={() => setPaused((current) => !current)}
+        style={styles.background}
+      >
         <AudioVisualizer
           bars={bars}
           width={waveWidth}
@@ -310,19 +319,14 @@ export function MatchCard({
               : 'WAITING FOR AUDIO'}
         </Text>
 
-        {/* Tap anywhere to pause. The play badge only appears when stopped. */}
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={paused ? 'Play preview' : 'Pause preview'}
-          onPress={() => setPaused((current) => !current)}
-          style={styles.playSurface}
-        >
-          {(paused || !active) && (
+        {/* The whole card is the play/pause target — see `background`. */}
+        {(paused || !active) && (
+          <View pointerEvents="none" style={styles.playSurface}>
             <View style={styles.playBadge}>
-              <Ionicons name="play" size={40} color={BumpColors.white} />
+              <Ionicons name="play" size={48} color={BumpColors.white} />
             </View>
-          )}
-        </Pressable>
+          </View>
+        )}
 
         <LinearGradient
           colors={['transparent', 'rgba(0,0,0,0.55)', 'rgba(0,0,0,0.94)']}
@@ -332,14 +336,14 @@ export function MatchCard({
         />
 
         {isCollab && (
-          <View style={styles.collabBadge}>
+          <View pointerEvents="none" style={styles.collabBadge}>
             <Ionicons name="git-merge" size={13} color={BumpColors.black} />
             <Text style={styles.collabBadgeText}>Open collab</Text>
           </View>
         )}
 
         {post.respondsTo && (
-          <View style={styles.responseBadge}>
+          <View pointerEvents="none" style={styles.responseBadge}>
             <Ionicons name="return-down-forward" size={13} color={accent} />
             <Text style={styles.responseBadgeText} numberOfLines={1}>
               on @{post.respondsTo.artistHandle} — {post.respondsTo.title}
@@ -348,11 +352,12 @@ export function MatchCard({
         )}
 
         {/* --- Right rail --- */}
-        <View style={styles.rail}>
+        <View pointerEvents="box-none" style={styles.rail}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={`Bump ${artist.handle}`}
-            onPress={() => settle('bump')}
+            hitSlop={TOUCH_SLOP}
+            onPress={() => settle(1)}
             style={({ pressed }) => [
               styles.bumpButton,
               bumped && styles.bumpButtonDone,
@@ -360,7 +365,7 @@ export function MatchCard({
             ]}
           >
             <BumpIcon
-              size={38}
+              size={30}
               color={bumped ? BumpColors.black : BumpColors.mint}
               creaseColor={bumped ? BumpColors.mint : BumpColors.black}
               glow={!bumped}
@@ -395,12 +400,12 @@ export function MatchCard({
         </View>
 
         {/* --- Info block --- */}
-        <View style={styles.info}>
-          <View style={styles.identityRow}>
+        <View pointerEvents="box-none" style={styles.info}>
+          <View pointerEvents="box-none" style={styles.identityRow}>
             <Pressable
               accessibilityRole="button"
               onPress={() => onOpenProfile(item)}
-              hitSlop={6}
+              hitSlop={TOUCH_SLOP}
             >
               <ArtistAvatar
                 handle={artist.handle}
@@ -421,6 +426,7 @@ export function MatchCard({
 
             <Pressable
               accessibilityRole="button"
+              hitSlop={TOUCH_SLOP}
               onPress={() => onToggleFollow(artist.id)}
               style={[
                 styles.followButton,
@@ -438,7 +444,7 @@ export function MatchCard({
             </Pressable>
           </View>
 
-          <View style={styles.lookingRow}>
+          <View pointerEvents="box-none" style={styles.lookingRow}>
             <View style={styles.lookingChip}>
               <Ionicons name="search" size={11} color={BumpColors.mint} />
               <Text style={styles.lookingText}>{artist.lookingFor}</Text>
@@ -492,6 +498,7 @@ export function MatchCard({
                 return (
                   <Pressable
                     key={option.id}
+                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
                     onPress={() => {
                       onSelectPost(artist.id, option.id);
                       setPaused(false);
@@ -532,32 +539,33 @@ export function MatchCard({
                 color={BumpColors.muted}
               />
               <Text style={styles.hintText}>
-                Swipe right to bump · up for the next artist
+                Swipe either way to bump · up for the next artist
               </Text>
             </View>
           )}
         </View>
 
-        {/* --- Swipe stamps --- */}
+        {/* --- Swipe stamps. Either direction bumps. --- */}
         <Animated.View
           pointerEvents="none"
-          style={[styles.stamp, styles.bumpStamp, { opacity: bumpStampOpacity }]}
+          style={[styles.stamp, styles.stampLeft, { opacity: stampLeftOpacity }]}
         >
-          <BumpIcon size={30} color={BumpColors.mint} sparks />
-          <Text style={[styles.stampText, { color: BumpColors.mint }]}>
-            BUMP
-          </Text>
+          <BumpIcon size={26} color={BumpColors.mint} sparks />
+          <Text style={styles.stampText}>BUMP</Text>
         </Animated.View>
 
         <Animated.View
           pointerEvents="none"
-          style={[styles.stamp, styles.skipStamp, { opacity: skipStampOpacity }]}
+          style={[
+            styles.stamp,
+            styles.stampRight,
+            { opacity: stampRightOpacity },
+          ]}
         >
-          <Text style={[styles.stampText, { color: BumpColors.grey }]}>
-            SKIP
-          </Text>
+          <BumpIcon size={26} color={BumpColors.mint} sparks />
+          <Text style={styles.stampText}>BUMP</Text>
         </Animated.View>
-      </View>
+      </Pressable>
     </Animated.View>
   );
 }
@@ -579,6 +587,7 @@ function RailButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      hitSlop={TOUCH_SLOP}
       onPress={onPress}
       style={({ pressed }) => [styles.railButton, pressed && styles.pressed]}
     >
@@ -624,9 +633,9 @@ const styles = StyleSheet.create({
   },
 
   playBadge: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: 94,
+    height: 94,
+    borderRadius: 47,
     alignItems: 'center',
     justifyContent: 'center',
     paddingLeft: 5,
@@ -928,20 +937,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.35)',
   },
 
-  bumpStamp: {
+  stampLeft: {
     left: 26,
     borderColor: BumpColors.mint,
     transform: [{ rotate: '-11deg' }],
   },
 
-  skipStamp: {
+  stampRight: {
     right: 26,
-    borderColor: BumpColors.grey,
+    borderColor: BumpColors.mint,
     transform: [{ rotate: '11deg' }],
   },
 
   stampText: {
-    fontSize: 26,
+    color: BumpColors.mint,
+    fontSize: 24,
     fontWeight: '900',
     letterSpacing: 1.5,
   },

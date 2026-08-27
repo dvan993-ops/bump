@@ -2,7 +2,8 @@
  * Match — discovering the person you should make your next song with.
  *
  * A vertical, full-screen, sound-first feed. Every card plays immediately;
- * swipe up for the next artist, swipe right (or hit the dap button) to Bump.
+ * swipe up for the next artist, swipe either way (or hit the dap button) to
+ * Bump.
  * Open Collabs sit inside the same feed rather than in a section of their own,
  * so an ask you can answer right now turns up between people you might work
  * with later.
@@ -207,13 +208,6 @@ export default function MatchScreen() {
     [advance],
   );
 
-  const handleSkip = useCallback(
-    (item: FeedItem) => {
-      advance(item.key);
-    },
-    [advance],
-  );
-
   const handleShare = useCallback(async (item: FeedItem) => {
     try {
       await Share.share({
@@ -286,7 +280,6 @@ export default function MatchScreen() {
               selectedPostId={selectedPosts[item.artist.id]}
               showHint={index === 0}
               onBump={handleBump}
-              onSkip={handleSkip}
               onToggleFollow={(artistId) =>
                 setFollowedIds((current) =>
                   current.includes(artistId)

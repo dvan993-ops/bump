@@ -16,7 +16,7 @@ import {
   useAudioSampleListener,
 } from "expo-audio";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ViewToken } from "react-native";
 import {
   Alert,
@@ -33,6 +33,8 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 const TEST_BEAT = require("../../assets/audio/test-beat.wav");
+/** Generous touch padding — these are one-handed, in-motion targets. */
+const TOUCH_SLOP = { top: 10, bottom: 10, left: 12, right: 12 };
 const WAVE_BAR_COUNT = 28;
 const MIN_WAVE_HEIGHT = 8;
 const MAX_WAVE_HEIGHT = 130;
@@ -234,44 +236,62 @@ type DraggableRatingProps = {
  * The user can tap or drag across the stars to choose a rating from 0 to 5.
  */
 function DraggableRating({ value, onChange }: DraggableRatingProps) {
-  const [trackWidth, setTrackWidth] = useState(1);
+  const trackRef = useRef<View>(null);
 
-  // Creates and remembers the touch/drag handler used by the star rating control.
+  // Where the star row sits on screen, in page coordinates.
+  //
+  // Touch events report `locationX` relative to whichever view was actually
+  // hit — and when you tap a star, that view is the star, not the row. Using it
+  // made a tap on the fifth star read as half a star. Page coordinates measured
+  // against the row are the same wherever the touch lands.
+  const track = useRef({ x: 0, width: 1 });
+
+  const measureTrack = useCallback(() => {
+    trackRef.current?.measureInWindow((x, _y, width) => {
+      if (width > 0) {
+        track.current = { x, width };
+      }
+    });
+  }, []);
+
+  const ratingAt = useCallback((pageX: number) => {
+    const { x, width } = track.current;
+    const offset = Math.max(0, Math.min(pageX - x, width));
+
+    // Each star owns a fifth of the row: its left half is a half star, its
+    // right half a whole one. Tapping the third star gives you three.
+    const slot = width / 5;
+    const index = Math.min(4, Math.floor(offset / slot));
+    const intoSlot = offset - index * slot;
+
+    return index + (intoSlot > slot / 2 ? 1 : 0.5);
+  }, []);
+
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
-        onPanResponderGrant: (event) => {
-          const x = Math.max(
-            0,
-            Math.min(event.nativeEvent.locationX, trackWidth),
-          );
-          onChange(Math.round((x / trackWidth) * 10) / 2);
-        },
-        onPanResponderMove: (event) => {
-          const x = Math.max(
-            0,
-            Math.min(event.nativeEvent.locationX, trackWidth),
-          );
-          onChange(Math.round((x / trackWidth) * 10) / 2);
-        },
+        onPanResponderGrant: (_event, gesture) => onChange(ratingAt(gesture.x0)),
+        onPanResponderMove: (_event, gesture) =>
+          onChange(ratingAt(gesture.moveX)),
       }),
-    [onChange, trackWidth],
+    [onChange, ratingAt],
   );
 
   return (
     <View style={styles.ratingSection}>
-      <View style={styles.ratingTextRow}>
+      <View pointerEvents="none" style={styles.ratingTextRow}>
         <Text style={styles.ratingTitle}>Rate this beat</Text>
         <Text style={styles.yourRating}>
-          {value === 0 ? "Drag to rate" : `${value.toFixed(1)} / 5`}
+          {value === 0 ? "Tap or drag to rate" : `${value.toFixed(1)} / 5`}
         </Text>
       </View>
 
       <View
+        ref={trackRef}
         {...panResponder.panHandlers}
-        onLayout={(event) => setTrackWidth(event.nativeEvent.layout.width)}
+        onLayout={measureTrack}
         style={styles.ratingTrack}
       >
         {[0, 1, 2, 3, 4].map((index) => {
@@ -279,12 +299,13 @@ function DraggableRating({ value, onChange }: DraggableRatingProps) {
           const half = !full && value >= index + 0.5;
 
           return (
-            <Ionicons
-              key={index}
-              name={full ? "star" : half ? "star-half" : "star-outline"}
-              size={31}
-              color={value > index ? COLORS.green : COLORS.white}
-            />
+            <View key={index} pointerEvents="none" style={styles.starSlot}>
+              <Ionicons
+                name={full ? "star" : half ? "star-half" : "star-outline"}
+                size={33}
+                color={value > index ? COLORS.green : COLORS.white}
+              />
+            </View>
           );
         })}
       </View>
@@ -306,6 +327,7 @@ function RailButton({ icon, label, active = false, onPress }: RailButtonProps) {
   return (
     <Pressable
       accessibilityRole="button"
+      hitSlop={TOUCH_SLOP}
       onPress={onPress}
       style={({ pressed }) => [
         styles.railButton,
@@ -562,7 +584,12 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 
   return (
     <View style={[styles.card, { height }]}>
-      <View style={styles.beatBackground}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={paused ? "Play preview" : "Pause preview"}
+        onPress={() => setPaused((current) => !current)}
+        style={styles.beatBackground}
+      >
         <AudioWaveform bars={waveBars} />
 
         <Text style={styles.samplingStatus}>
@@ -573,25 +600,21 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
               : "WAITING FOR AUDIO"}
         </Text>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={paused ? "Play preview" : "Pause preview"}
-          onPress={() => setPaused((current) => !current)}
-          style={styles.playSurface}
-        >
-          {(paused || !active) && (
+        {(paused || !active) && (
+          <View pointerEvents="none" style={styles.playSurface}>
             <View style={styles.playButton}>
-              <Ionicons name="play" size={42} color={COLORS.white} />
+              <Ionicons name="play" size={50} color={COLORS.white} />
             </View>
-          )}
-        </Pressable>
+          </View>
+        )}
 
-        <View style={styles.rightRail}>
+        <View pointerEvents="box-none" style={styles.rightRail}>
           <Pressable
             accessibilityRole="button"
             onPress={() =>
               Alert.alert("Producer profile", `Open @${beat.producer}`)
             }
+            hitSlop={TOUCH_SLOP}
             style={styles.profileButton}
           >
             <View style={styles.blankProfile}>
@@ -632,12 +655,13 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
           />
         </View>
 
-        <View style={styles.beatDetails}>
-          <View style={styles.producerRow}>
+        <View pointerEvents="box-none" style={styles.beatDetails}>
+          <View pointerEvents="box-none" style={styles.producerRow}>
             <Text style={styles.producer}>@{beat.producer}</Text>
 
             <Pressable
               accessibilityRole="button"
+              hitSlop={TOUCH_SLOP}
               onPress={() => setFollowing((current) => !current)}
               style={[styles.followButton, following && styles.followingButton]}
             >
@@ -657,7 +681,7 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
             {beat.caption}
           </Text>
 
-          <View style={styles.metadataRow}>
+          <View pointerEvents="box-none" style={styles.metadataRow}>
             <View style={styles.genrePill}>
               <Text style={styles.genrePillText}>{beat.genre}</Text>
             </View>
@@ -666,7 +690,7 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
             <Text style={styles.metadata}>{beat.musicalKey}</Text>
           </View>
 
-          <View style={styles.previewRow}>
+          <View pointerEvents="box-none" style={styles.previewRow}>
             <Ionicons
               name={paused || !active ? "play" : "musical-notes"}
               size={16}
@@ -690,7 +714,7 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
         </View>
 
         <DraggableRating value={userRating} onChange={setUserRating} />
-      </View>
+      </Pressable>
 
       <ThoughtsSheet
         visible={thoughtsOpen}
@@ -1146,9 +1170,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   playButton: {
-    width: 78,
-    height: 78,
-    borderRadius: 39,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
     alignItems: "center",
     justifyContent: "center",
     paddingLeft: 5,
@@ -1447,8 +1471,13 @@ const styles = StyleSheet.create({
   ratingTrack: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingVertical: 2,
+    paddingVertical: 9,
+  },
+
+  starSlot: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
   },
   modalRoot: {
     flex: 1,
