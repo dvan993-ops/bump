@@ -387,11 +387,10 @@ export function MatchCard({
               ]}
             >
               <BumpIcon
-                size={30}
+                size={44}
                 color={bumped ? BumpColors.black : BumpColors.mint}
-                creaseColor={bumped ? BumpColors.mint : BumpColors.black}
                 glow={!bumped}
-                sparks={bumped}
+                bumped={bumped}
               />
             </Pressable>
 
@@ -573,7 +572,7 @@ export function MatchCard({
               { opacity: stampLeftOpacity },
             ]}
           >
-            <BumpIcon size={26} color={BumpColors.mint} sparks />
+            <BumpIcon size={40} color={BumpColors.mint} bumped animated={false} />
             <Text style={styles.stampText}>BUMP</Text>
           </Animated.View>
 
@@ -585,7 +584,7 @@ export function MatchCard({
               { opacity: stampRightOpacity },
             ]}
           >
-            <BumpIcon size={26} color={BumpColors.mint} sparks />
+            <BumpIcon size={40} color={BumpColors.mint} bumped animated={false} />
             <Text style={styles.stampText}>BUMP</Text>
           </Animated.View>
         </Pressable>

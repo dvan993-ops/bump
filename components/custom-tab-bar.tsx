@@ -31,7 +31,8 @@ const TABS: TabConfig[] = [
     inactiveIcon: 'home-outline',
     size: 25,
   },
-  { key: 'match', label: 'Match', icon: 'bump', size: 28 },
+  // The dap mark is a wide 3:2 lockup, so it needs more width than a glyph.
+  { key: 'match', label: 'Match', icon: 'bump', size: 44 },
   {
     key: 'create',
     label: 'Create',
@@ -81,7 +82,7 @@ export function CustomTabBar({ activeIndex, onTabPress }: Props) {
               <BumpIcon
                 size={tab.size}
                 color={tint}
-                creaseColor={COLORS.black}
+                bumped={focused}
                 glow={focused}
               />
             ) : (

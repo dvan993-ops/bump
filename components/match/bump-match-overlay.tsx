@@ -165,12 +165,12 @@ export function BumpMatchOverlay({
           {!impacted ? (
             <View style={styles.fistStage}>
               <Animated.View style={{ transform: [{ translateX: leftFist }] }}>
-                <BumpIcon size={92} variant="fist" color={BumpColors.mint} />
+                <BumpIcon size={85} variant="fist" color={BumpColors.mint} />
               </Animated.View>
 
               <Animated.View style={{ transform: [{ translateX: rightFist }] }}>
                 <BumpIcon
-                  size={92}
+                  size={85}
                   variant="fist"
                   mirrored
                   color={BumpColors.mint}
@@ -181,13 +181,9 @@ export function BumpMatchOverlay({
             <Animated.View
               style={[styles.fistStage, { transform: [{ scale: popScale }] }]}
             >
-              <BumpIcon
-                size={140}
-                color={BumpColors.mint}
-                creaseColor={BumpColors.black}
-                sparks
-                glow
-              />
+              {/* Two 85pt fists side by side are exactly one 170pt dap, so the
+                  swap from the approach to the impact lands on the same mark. */}
+              <BumpIcon size={170} color={BumpColors.mint} bumped glow />
             </Animated.View>
           )}
 
@@ -212,7 +208,7 @@ export function BumpMatchOverlay({
               />
 
               <View style={styles.avatarGap}>
-                <BumpIcon size={30} color={BumpColors.mint} />
+                <BumpIcon size={40} color={BumpColors.mint} bumped animated={false} />
               </View>
 
               <ArtistAvatar

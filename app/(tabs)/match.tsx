@@ -317,7 +317,7 @@ export default function MatchScreen() {
           })}
           ListEmptyComponent={
             <View style={[styles.empty, { height: feedHeight }]}>
-              <BumpIcon size={64} color={BumpColors.muted} />
+              <BumpIcon size={96} color={BumpColors.muted} />
               <Text style={styles.emptyTitle}>Nobody left to hear</Text>
               <Text style={styles.emptyText}>
                 Your filters are narrow. Widen the role, genre or distance and
@@ -370,7 +370,7 @@ export default function MatchScreen() {
           onPress={() => comingSoon('Your bumps')}
           style={styles.iconButton}
         >
-          <BumpIcon size={24} color={BumpColors.white} />
+          <BumpIcon size={34} color={BumpColors.white} bumped animated={false} />
           {waitingOnYou > 0 && (
             <View style={styles.badge}>
               <Text style={styles.badgeText}>{waitingOnYou}</Text>

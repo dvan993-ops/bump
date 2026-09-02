@@ -1,104 +1,138 @@
 /**
- * The Bump mark: two fists dapping.
+ * The Bump mark: two fists, apart when idle and connected when bumped.
  *
  * Drawn with Skia rather than an image or an icon font so it stays sharp at any
  * size, recolours per state, and can be split into single fists for the match
  * animation. Skia is already a dependency (it draws the audio visualiser), so
  * this adds nothing to install.
  *
- * All geometry is authored in a 48x48 box and scaled to `size`. The fists are
- * tilted towards each other by 10 degrees, which is what stops the silhouette
- * reading as two rounded rectangles and starts it reading as a dap.
+ * The mark is an outline, not a silhouette, and it is wide: roughly 3:1. That
+ * is the shape of the gesture, and it is why `size` means WIDTH here — the box
+ * is `size` by `size * 2/3`. Anywhere the old square mark sat, the new one
+ * wants about 1.5x the number to carry the same weight.
+ *
+ * Two states, and they are the whole idea:
+ *   bumped={false}  fists apart, waiting
+ *   bumped={true}   fists connected, impact burst firing
+ * The transition springs, so a bump lands rather than cuts.
  */
 
 import { BlurMask, Canvas, Group, Path } from '@shopify/react-native-skia';
+import { useEffect } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  useDerivedValue,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
-const BOX = 48;
-const CENTRE = BOX / 2;
-const TILT = (10 * Math.PI) / 180;
+/** The dap is authored in a 240 x 160 box; a single fist is its left half. */
+const DAP_WIDTH = 240;
+const FIST_WIDTH = DAP_WIDTH / 2;
+const ASPECT = 2 / 3;
+
+const DAP_CENTRE_Y = 80;
+/** A lone fist keeps the same drawing scale, so its box is cropped, not shrunk. */
+const FIST_CENTRE_Y = 40;
+
+/** Where the left fist's knuckle line sits when the fists are apart, and when they meet. */
+const KNUCKLES_APART = 109;
+const KNUCKLES_TOUCHING = 120;
+const TRAVEL = KNUCKLES_TOUCHING - KNUCKLES_APART;
 
 /**
- * One fist, wrist at the left, knuckles facing right. The four arcs on the
- * right edge are the knuckles; they bulge to x = 22.875, so a mirrored copy
- * leaves a small gap at the centre — fists touching, not overlapping.
+ * Creases close up below roughly 88pt of dap, so they are dropped there and the
+ * outline thickens a little to hold its weight.
  */
+const DETAIL_WIDTH = 88;
+const STROKE_DETAILED = 5;
+const STROKE_PLAIN = 6;
+
+/**
+ * One fist, wrist at the left, knuckles facing right and sitting on x = 0.
+ * The right-hand fist is this same geometry mirrored.
+ */
+const CUFF_PATH =
+  'M -100,-23 h 8 a 4,4 0 0 1 4,4 v 38 a 4,4 0 0 1 -4,4 h -8 ' +
+  'a 4,4 0 0 1 -4,-4 v -38 a 4,4 0 0 1 4,-4 z';
+
 const FIST_PATH =
-  'M 12 13 L 20.5 13 ' +
-  'A 2.375 2.375 0 0 1 20.5 17.75 ' +
-  'A 2.375 2.375 0 0 1 20.5 22.5 ' +
-  'A 2.375 2.375 0 0 1 20.5 27.25 ' +
-  'A 2.375 2.375 0 0 1 20.5 32 ' +
-  'L 20.5 33 Q 20.5 35.5 18 35.5 L 12 35.5 ' +
-  'Q 5.5 35.5 5.5 29 L 5.5 19.5 Q 5.5 13 12 13 Z';
+  'M -88,-25 C -80,-30 -70,-31 -58,-31 C -44,-31 -32,-31 -24,-29 ' +
+  'C -10,-26 0,-18 0,-5 C 0,7 -7,16 -18,20 C -30,25 -42,26 -54,22 ' +
+  'C -66,18 -74,25 -88,25 Z';
 
-const WRIST_PATH =
-  'M 3 20.5 L 8 20.5 L 8 28 L 3 28 ' +
-  'A 2.75 2.75 0 0 1 0.25 25.25 L 0.25 23.25 A 2.75 2.75 0 0 1 3 20.5 Z';
-
-/** The curve where the thumb crosses the fingers, plus the knuckle creases. */
+/** The thumb lying across the curled fingers, its knuckle, and the finger crease. */
 const DETAIL_PATHS = [
-  'M 12.8 13.2 Q 10.4 24.2 12.8 35.3',
-  'M 15.6 17.75 L 20.1 17.75',
-  'M 15.6 22.5 L 20.1 22.5',
-  'M 15.6 27.25 L 20.1 27.25',
+  'M -58,3 C -57,-4 -49,-8 -41,-6 C -33,-4 -32,3 -39,6 C -47,9 -55,8 -58,3 Z',
+  'M -47,-7 L -47,-15',
+  'M -60,6 C -55,16 -42,19 -28,14',
 ];
 
-/** Impact marks thrown off the point of contact. */
-const SPARK_PATHS = ['M 19.6 10.6 L 16.4 5.8', 'M 28.4 10.6 L 31.6 5.8'];
+/** Impact marks thrown off the point of contact, above and below. */
+const SPARK_PATHS = [
+  'M 120,40 L 120,25',
+  'M 103,44 L 94,31',
+  'M 137,44 L 146,31',
+  'M 120,120 L 120,135',
+  'M 103,116 L 94,129',
+  'M 137,116 L 146,129',
+];
 
-/** Rotation about the centre of the box, as a Skia transform list. */
-function tiltAboutCentre(radians: number) {
-  return [
-    { translateX: CENTRE },
-    { translateY: CENTRE },
-    { rotate: radians },
-    { translateX: -CENTRE },
-    { translateY: -CENTRE },
-  ];
+const MIRROR = { scaleX: -1 } as const;
+
+type StrokeProps = {
+  path: string;
+  width: number;
+};
+
+/** Every line in the mark is the same stroke, in the enclosing group's colour. */
+function Stroke({ path, width }: StrokeProps) {
+  return (
+    <Path
+      path={path}
+      style="stroke"
+      strokeWidth={width}
+      strokeCap="round"
+      strokeJoin="round"
+    />
+  );
 }
-
-const MIRROR = [{ translateX: BOX }, { scaleX: -1 }];
 
 type FistProps = {
   detail: boolean;
-  creaseColor: string;
+  stroke: number;
 };
 
-/** One fist plus its wrist, drawn in the enclosing group's colour. */
-function Fist({ detail, creaseColor }: FistProps) {
+/** One fist plus its cuff, drawn around its own knuckle line. */
+function Fist({ detail, stroke }: FistProps) {
   return (
     <Group>
-      <Path path={WRIST_PATH} />
-      <Path path={FIST_PATH} />
+      <Stroke path={CUFF_PATH} width={stroke} />
+      <Stroke path={FIST_PATH} width={stroke} />
 
       {detail &&
         DETAIL_PATHS.map((line) => (
-          <Path
-            key={line}
-            path={line}
-            style="stroke"
-            strokeWidth={1.15}
-            strokeCap="round"
-            color={creaseColor}
-            opacity={0.42}
-          />
+          <Stroke key={line} path={line} width={stroke} />
         ))}
     </Group>
   );
 }
 
 export type BumpIconProps = {
+  /** Width in points. The mark is 3:2, so height comes out at two thirds of it. */
   size?: number;
   color?: string;
-  /** Colour of the creases — normally whatever sits behind the icon. */
-  creaseColor?: string;
   /** `dap` is both fists; `fist` is a single one, for the match animation. */
   variant?: 'dap' | 'fist';
   /** Flips a single fist to face left. Ignored for `dap`. */
   mirrored?: boolean;
-  /** Impact marks. Off by default so the resting state stays calm. */
-  sparks?: boolean;
+  /** Fists connect and the impact burst fires. Ignored for `fist`. */
+  bumped?: boolean;
+  /** Set false to land on the given state with no spring. */
+  animated?: boolean;
+  /** Force the thumb and crease lines on or off. Defaults to on above 88pt. */
+  detail?: boolean;
   /** Soft outer glow, matching the visualiser's treatment. */
   glow?: boolean;
   opacity?: number;
@@ -106,61 +140,107 @@ export type BumpIconProps = {
 };
 
 export function BumpIcon({
-  size = 28,
+  size = 44,
   color = '#6FFFB7',
-  creaseColor = '#0B0B0B',
   variant = 'dap',
   mirrored = false,
-  sparks = false,
+  bumped = false,
+  animated = true,
+  detail,
   glow = false,
   opacity = 1,
   style,
 }: BumpIconProps) {
-  // Creases turn to mush below roughly 26px, so they are dropped there.
-  const detail = size >= 26;
+  const isDap = variant === 'dap';
+  const box = isDap ? DAP_WIDTH : FIST_WIDTH;
+
+  // A lone fist draws at twice the scale of a dap of the same `size`, so two of
+  // them side by side are exactly one dap.
+  const drawnAsDap = isDap ? size : size * 2;
+  const showDetail = detail ?? drawnAsDap >= DETAIL_WIDTH;
+  const stroke = showDetail ? STROKE_DETAILED : STROKE_PLAIN;
+
+  // 0 = apart, 1 = connected.
+  const contact = useSharedValue(bumped && isDap ? 1 : 0);
+
+  useEffect(() => {
+    const target = bumped && isDap ? 1 : 0;
+
+    if (!animated) {
+      contact.value = target;
+      return;
+    }
+
+    contact.value = target
+      ? withSpring(1, { damping: 11, stiffness: 240, mass: 0.6 })
+      : withTiming(0, { duration: 160 });
+  }, [animated, bumped, isDap, contact]);
+
+  const leftFist = useDerivedValue(() => [
+    { translateX: KNUCKLES_APART + TRAVEL * contact.value },
+    { translateY: DAP_CENTRE_Y },
+  ]);
+
+  const rightFist = useDerivedValue(() => [
+    { translateX: DAP_WIDTH - (KNUCKLES_APART + TRAVEL * contact.value) },
+    { translateY: DAP_CENTRE_Y },
+    MIRROR,
+  ]);
+
+  // The burst pops outward from the point of contact as it fades in.
+  const burst = useDerivedValue(() => [
+    { translateX: KNUCKLES_TOUCHING },
+    { translateY: DAP_CENTRE_Y },
+    { scale: 0.62 + 0.38 * contact.value },
+    { translateX: -KNUCKLES_TOUCHING },
+    { translateY: -DAP_CENTRE_Y },
+  ]);
+
+  const burstOpacity = useDerivedValue(() => contact.value);
+
+  const loneFist = mirrored
+    ? [{ translateX: FIST_WIDTH - KNUCKLES_APART }, { translateY: FIST_CENTRE_Y }, MIRROR]
+    : [{ translateX: KNUCKLES_APART }, { translateY: FIST_CENTRE_Y }];
 
   const artwork = (
     <Group color={color} opacity={opacity}>
-      {variant === 'dap' ? (
+      {isDap ? (
         <>
-          <Group transform={tiltAboutCentre(-TILT)}>
-            <Fist detail={detail} creaseColor={creaseColor} />
+          <Group transform={leftFist}>
+            <Fist detail={showDetail} stroke={stroke} />
           </Group>
 
-          <Group transform={[...tiltAboutCentre(TILT), ...MIRROR]}>
-            <Fist detail={detail} creaseColor={creaseColor} />
+          <Group transform={rightFist}>
+            <Fist detail={showDetail} stroke={stroke} />
+          </Group>
+
+          <Group transform={burst} opacity={burstOpacity}>
+            {SPARK_PATHS.map((spark) => (
+              <Stroke key={spark} path={spark} width={stroke} />
+            ))}
           </Group>
         </>
       ) : (
-        <Group transform={mirrored ? MIRROR : undefined}>
-          <Fist detail={detail} creaseColor={creaseColor} />
+        <Group transform={loneFist}>
+          <Fist detail={showDetail} stroke={stroke} />
         </Group>
       )}
-
-      {sparks &&
-        SPARK_PATHS.map((spark) => (
-          <Path
-            key={spark}
-            path={spark}
-            style="stroke"
-            strokeWidth={2.3}
-            strokeCap="round"
-          />
-        ))}
     </Group>
   );
+
+  const height = size * ASPECT;
 
   return (
     <View
       pointerEvents="none"
-      style={[{ width: size, height: size }, style]}
+      style={[{ width: size, height }, style]}
       accessible={false}
     >
-      <Canvas style={{ width: size, height: size }}>
-        <Group transform={[{ scale: size / BOX }]}>
+      <Canvas style={{ width: size, height }}>
+        <Group transform={[{ scale: size / box }]}>
           {glow && (
             <Group opacity={0.6}>
-              <BlurMask blur={Math.max(2, size * 0.14)} style="normal" />
+              <BlurMask blur={Math.max(2, size * 0.07)} style="normal" />
               {artwork}
             </Group>
           )}

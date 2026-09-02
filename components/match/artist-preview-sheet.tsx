@@ -176,7 +176,12 @@ export function ArtistPreviewSheet({
                   </View>
 
                   <View style={styles.postBumps}>
-                    <BumpIcon size={16} color={BumpColors.grey} />
+                    <BumpIcon
+                      size={26}
+                      color={BumpColors.grey}
+                      bumped
+                      animated={false}
+                    />
                     <Text style={styles.postBumpsText}>
                       {formatCount(post.bumps)}
                     </Text>
@@ -216,9 +221,9 @@ export function ArtistPreviewSheet({
               ]}
             >
               <BumpIcon
-                size={24}
+                size={34}
                 color={bumped ? BumpColors.mint : BumpColors.black}
-                creaseColor={bumped ? BumpColors.raised : BumpColors.mint}
+                bumped={bumped}
               />
               <Text style={[styles.bumpText, bumped && styles.bumpTextDone]}>
                 {bumped ? 'Bumped' : 'Bump'}
