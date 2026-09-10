@@ -1131,7 +1131,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   beatBackground: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: COLORS.black,
   },
 
@@ -1165,7 +1165,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   playSurface: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1245,7 +1245,7 @@ const styles = StyleSheet.create({
     minWidth: 120,
   },
   sortDropdownBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     zIndex: 24,
   },
   sortDropdownWrapper: {
@@ -1487,7 +1487,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   modalBackdrop: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: "rgba(0,0,0,0.68)",
   },
   filterSheet: {
