@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
   },
 
   background: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: BumpColors.black,
   },
 
@@ -650,7 +650,7 @@ const styles = StyleSheet.create({
   },
 
   playSurface: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -75,7 +75,7 @@ const styles = StyleSheet.create({
   },
 
   page: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
 
   visible: {
