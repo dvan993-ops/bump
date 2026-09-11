@@ -58,6 +58,7 @@ export function MatchFilterSheet({
   // Re-sync whenever the sheet is opened, so a cancelled edit is discarded.
   useEffect(() => {
     if (visible) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDraft(filters);
     }
   }, [visible, filters]);

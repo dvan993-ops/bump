@@ -269,6 +269,10 @@ function DraggableRating({ value, onChange }: DraggableRatingProps) {
 
   const panResponder = useMemo(
     () =>
+      // PanResponder's handlers only ever run in response to touch events,
+      // never during render, so closing over `ratingAt` (which reads the
+      // `track` ref) here is safe despite the lint rule's caution.
+      // eslint-disable-next-line react-hooks/refs
       PanResponder.create({
         onStartShouldSetPanResponder: () => true,
         onMoveShouldSetPanResponder: () => true,
@@ -538,6 +542,10 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 
   // Configures the audio player to loop the preview and play at full volume.
   useEffect(() => {
+    // expo-audio's AudioPlayer only exposes loop/volume as settable
+    // properties on the native player object — there is no constructor
+    // option, so this direct mutation is the documented API.
+    // eslint-disable-next-line react-hooks/immutability
     player.loop = true;
     player.volume = 1;
   }, [player]);
@@ -552,6 +560,9 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 
     if (!active) {
       void player.seekTo(0);
+      // Resets the visualizer for the card the user scrolled away from, so
+      // it isn't left showing stale bars the next time it becomes active.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWaveBars(Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT));
       hasReceivedSamplesRef.current = false;
       setHasReceivedSamples(false);
@@ -918,7 +929,7 @@ export default function HomeScreen() {
   }, [activeTab, genre, sortMode]);
 
   // Updates `activeBeatId` whenever the user scrolls to a different full-screen beat.
-  const onViewableItemsChanged = useRef(
+  const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const visibleItem = viewableItems.find((item) => item.isViewable);
       const visibleBeat = visibleItem?.item as Beat | undefined;
@@ -927,12 +938,16 @@ export default function HomeScreen() {
         setActiveBeatId(visibleBeat.id);
       }
     },
-  ).current;
+    [],
+  );
 
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 80,
-    minimumViewTime: 100,
-  }).current;
+  const viewabilityConfig = useMemo(
+    () => ({
+      itemVisiblePercentThreshold: 80,
+      minimumViewTime: 100,
+    }),
+    [],
+  );
 
   const filtersActive = genre !== "All" || sortMode !== "Recommended";
 
