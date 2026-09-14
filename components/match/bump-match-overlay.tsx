@@ -9,10 +9,8 @@
 
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  Animated,
-  Easing,
   Modal,
   Platform,
   Pressable,
@@ -20,6 +18,15 @@ import {
   Text,
   View,
 } from 'react-native';
+import Animated, {
+  Easing,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { BumpIcon } from '@/components/bump-icon';
 import { ArtistAvatar } from '@/components/match/artist-avatar';
@@ -72,78 +79,92 @@ export function BumpMatchOverlay({
   onClose,
   onAction,
 }: BumpMatchOverlayProps) {
-  const slide = useRef(new Animated.Value(0)).current;
-  const pop = useRef(new Animated.Value(0)).current;
-  const content = useRef(new Animated.Value(0)).current;
+  // Shared values, not refs: reanimated's `.value` is a compiler-safe
+  // stand-in for `useRef(...).current` here, since the completion callbacks
+  // below read and write it well after the render that starts the animation.
+  const slide = useSharedValue(0);
+  const pop = useSharedValue(0);
+  const content = useSharedValue(0);
 
   const [impacted, setImpacted] = useState(false);
 
+  const announceImpact = useCallback(() => {
+    setImpacted(true);
+
+    if (Platform.OS !== 'web') {
+      void Haptics.notificationAsync(
+        Haptics.NotificationFeedbackType.Success,
+      ).catch(() => {});
+    }
+  }, []);
+
   const run = useCallback(() => {
-    slide.setValue(0);
-    pop.setValue(0);
-    content.setValue(0);
+    slide.value = 0;
+    pop.value = 0;
+    content.value = 0;
     setImpacted(false);
 
-    Animated.timing(slide, {
-      toValue: 1,
-      duration: 300,
-      easing: Easing.bezier(0.2, 0.9, 0.2, 1),
-      useNativeDriver: true,
-    }).start(() => {
-      setImpacted(true);
+    slide.value = withTiming(
+      1,
+      { duration: 300, easing: Easing.bezier(0.2, 0.9, 0.2, 1) },
+      (finished) => {
+        if (!finished) {
+          return;
+        }
 
-      if (Platform.OS !== 'web') {
-        void Haptics.notificationAsync(
-          Haptics.NotificationFeedbackType.Success,
-        ).catch(() => {});
-      }
+        runOnJS(announceImpact)();
 
-      Animated.sequence([
-        Animated.spring(pop, {
-          toValue: 1,
-          useNativeDriver: true,
-          bounciness: 14,
-          speed: 14,
-        }),
-        Animated.timing(content, {
-          toValue: 1,
-          duration: 260,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]).start();
-    });
-  }, [content, pop, slide]);
+        pop.value = withSpring(
+          1,
+          { damping: 9, stiffness: 190, mass: 0.8 },
+          (poppedFinished) => {
+            if (poppedFinished) {
+              content.value = withTiming(1, {
+                duration: 260,
+                easing: Easing.out(Easing.quad),
+              });
+            }
+          },
+        );
+      },
+    );
+    // `slide`, `pop`, and `content` are shared values — stable references for
+    // the lifetime of the component, like refs, so they don't belong in the
+    // dependency array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [announceImpact]);
 
   useEffect(() => {
     if (visible) {
+      // Kicks off the fist-bump animation sequence — the canonical case for
+      // synchronizing an external animation system with a prop change.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       run();
     }
   }, [visible, run]);
 
+  const leftFistStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: interpolate(slide.value, [0, 1], [-150, 0]) }],
+  }));
+
+  const rightFistStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: interpolate(slide.value, [0, 1], [150, 0]) }],
+  }));
+
+  const popStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: interpolate(pop.value, [0, 1], [0.75, 1]) }],
+  }));
+
+  const bodyStyle = useAnimatedStyle(() => ({
+    opacity: content.value,
+    transform: [
+      { translateY: interpolate(content.value, [0, 1], [18, 0]) },
+    ],
+  }));
+
   if (!artist) {
     return null;
   }
-
-  const leftFist = slide.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-150, 0],
-  });
-
-  const rightFist = slide.interpolate({
-    inputRange: [0, 1],
-    outputRange: [150, 0],
-  });
-
-  const popScale = pop.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.75, 1],
-  });
-
-  const contentShift = content.interpolate({
-    inputRange: [0, 1],
-    outputRange: [18, 0],
-  });
 
   return (
     <Modal
@@ -164,11 +185,11 @@ export function BumpMatchOverlay({
         <View pointerEvents="box-none" style={styles.stage}>
           {!impacted ? (
             <View style={styles.fistStage}>
-              <Animated.View style={{ transform: [{ translateX: leftFist }] }}>
+              <Animated.View style={leftFistStyle}>
                 <BumpIcon size={85} variant="fist" color={BumpColors.mint} />
               </Animated.View>
 
-              <Animated.View style={{ transform: [{ translateX: rightFist }] }}>
+              <Animated.View style={rightFistStyle}>
                 <BumpIcon
                   size={85}
                   variant="fist"
@@ -178,9 +199,7 @@ export function BumpMatchOverlay({
               </Animated.View>
             </View>
           ) : (
-            <Animated.View
-              style={[styles.fistStage, { transform: [{ scale: popScale }] }]}
-            >
+            <Animated.View style={[styles.fistStage, popStyle]}>
               {/* Two 85pt fists side by side are exactly one 170pt dap, so the
                   swap from the approach to the impact lands on the same mark. */}
               <BumpIcon size={170} color={BumpColors.mint} bumped glow />
@@ -189,10 +208,7 @@ export function BumpMatchOverlay({
 
           <Animated.View
             pointerEvents={impacted ? 'auto' : 'none'}
-            style={[
-              styles.body,
-              { opacity: content, transform: [{ translateY: contentShift }] },
-            ]}
+            style={[styles.body, bodyStyle]}
           >
             <Text style={styles.title}>It&apos;s a Bump</Text>
             <Text style={styles.subtitle}>

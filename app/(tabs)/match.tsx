@@ -129,6 +129,9 @@ export default function MatchScreen() {
   // Keep the active card valid when filters change the feed under us.
   useEffect(() => {
     if (feed.length === 0) {
+      // The feed emptied out from under the current card (a filter change
+      // usually), so there is no longer a valid active card to point at.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveKey(null);
       return;
     }
@@ -233,7 +236,7 @@ export default function MatchScreen() {
     [],
   );
 
-  const onViewableItemsChanged = useRef(
+  const onViewableItemsChanged = useCallback(
     ({ viewableItems }: { viewableItems: ViewToken[] }) => {
       const visible = viewableItems.find((entry) => entry.isViewable);
       const item = visible?.item as FeedItem | undefined;
@@ -242,12 +245,16 @@ export default function MatchScreen() {
         setActiveKey(item.key);
       }
     },
-  ).current;
+    [],
+  );
 
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 80,
-    minimumViewTime: 100,
-  }).current;
+  const viewabilityConfig = useMemo(
+    () => ({
+      itemVisiblePercentThreshold: 80,
+      minimumViewTime: 100,
+    }),
+    [],
+  );
 
   const openCollabsOnly = filters.openCollabsOnly;
   const active = filtersAreActive(filters);

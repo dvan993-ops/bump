@@ -16,10 +16,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Animated,
-  Easing,
   Platform,
   Pressable,
   StyleSheet,
@@ -28,6 +26,16 @@ import {
   View,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  Extrapolation,
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AudioVisualizer } from '@/components/audio-visualizer';
@@ -123,6 +131,10 @@ export function MatchCard({
   const playing = active && !paused;
 
   useEffect(() => {
+    // expo-audio's AudioPlayer only exposes loop/volume as settable
+    // properties on the native player object — there is no constructor
+    // option, so this direct mutation is the documented API.
+    // eslint-disable-next-line react-hooks/immutability
     player.loop = true;
     player.volume = 1;
   }, [player]);
@@ -155,6 +167,9 @@ export function MatchCard({
     if (active) {
       seekToPreviewStart();
     } else {
+      // Resets the pause state kept by the card the user scrolled away from,
+      // so it is playing (not frozen paused) the next time it becomes active.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPaused(false);
     }
   }, [active, seekToPreviewStart]);
@@ -178,18 +193,20 @@ export function MatchCard({
 
   // --- Swipe -------------------------------------------------------------
 
-  const translateX = useRef(new Animated.Value(0)).current;
+  // Shared values, not refs: reanimated's `.value` is a compiler-safe stand-in
+  // for `useRef(...).current` here, since the gesture callbacks below read and
+  // write it well after the render that builds the gesture.
+  const translateX = useSharedValue(0);
   const threshold = width * SWIPE_FRACTION;
 
-  const decidedRef = useRef(false);
+  const decided = useSharedValue(false);
 
   const springBack = () => {
-    Animated.spring(translateX, {
-      toValue: 0,
-      useNativeDriver: true,
-      bounciness: 4,
-      speed: 16,
-    }).start();
+    translateX.value = withSpring(0, {
+      damping: 16,
+      stiffness: 260,
+      mass: 0.7,
+    });
   };
 
   /**
@@ -198,24 +215,25 @@ export function MatchCard({
    * that throws them away made the one gesture that matters feel risky.
    */
   const settle = (direction: 1 | -1) => {
-    if (decidedRef.current) {
+    if (decided.value) {
       return;
     }
 
-    decidedRef.current = true;
+    decided.value = true;
 
     tap(Haptics.ImpactFeedbackStyle.Heavy);
 
-    Animated.timing(translateX, {
-      toValue: direction * width * 1.15,
-      duration: 190,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start(() => {
-      translateX.setValue(0);
-      decidedRef.current = false;
-      onBump(item);
-    });
+    translateX.value = withTiming(
+      direction * width * 1.15,
+      { duration: 190, easing: Easing.out(Easing.cubic) },
+      (finished) => {
+        if (finished) {
+          translateX.value = 0;
+          decided.value = false;
+          runOnJS(onBump)(item);
+        }
+      },
+    );
   };
 
   /**
@@ -238,7 +256,7 @@ export function MatchCard({
         .activeOffsetX([-14, 14])
         .failOffsetY([-26, 26])
         .onUpdate((event) => {
-          translateX.setValue(event.translationX);
+          translateX.value = event.translationX;
         })
         .onEnd((event) => {
           // Velocity here is px/second, not px/ms.
@@ -260,7 +278,7 @@ export function MatchCard({
           springBack();
         })
         .onFinalize((_event, success) => {
-          if (!success && !decidedRef.current) {
+          if (!success && !decided.value) {
             springBack();
           }
         }),
@@ -272,22 +290,32 @@ export function MatchCard({
 
   // Dragging right shows the stamp on the left, and the other way round, so
   // the mark never sits under your thumb.
-  const stampLeftOpacity = translateX.interpolate({
-    inputRange: [0, threshold],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
+  const stampLeftStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      translateX.value,
+      [0, threshold],
+      [0, 1],
+      Extrapolation.CLAMP,
+    ),
+  }));
 
-  const stampRightOpacity = translateX.interpolate({
-    inputRange: [-threshold, 0],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
+  const stampRightStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      translateX.value,
+      [-threshold, 0],
+      [1, 0],
+      Extrapolation.CLAMP,
+    ),
+  }));
 
-  const rotate = translateX.interpolate({
-    inputRange: [-width, 0, width],
-    outputRange: ['-5deg', '0deg', '5deg'],
-  });
+  const cardStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      {
+        rotate: `${interpolate(translateX.value, [-width, 0, width], [-5, 0, 5])}deg`,
+      },
+    ],
+  }));
 
   // --- Layout ------------------------------------------------------------
 
@@ -307,12 +335,7 @@ export function MatchCard({
 
   return (
     <GestureDetector gesture={panGesture}>
-      <Animated.View
-        style={[
-          styles.card,
-          { height, transform: [{ translateX }, { rotate }] },
-        ]}
-      >
+      <Animated.View style={[styles.card, { height }, cardStyle]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={paused ? 'Play preview' : 'Pause preview'}
@@ -566,11 +589,7 @@ export function MatchCard({
           {/* --- Swipe stamps. Either direction bumps. --- */}
           <Animated.View
             pointerEvents="none"
-            style={[
-              styles.stamp,
-              styles.stampLeft,
-              { opacity: stampLeftOpacity },
-            ]}
+            style={[styles.stamp, styles.stampLeft, stampLeftStyle]}
           >
             <BumpIcon size={40} color={BumpColors.mint} bumped animated={false} />
             <Text style={styles.stampText}>BUMP</Text>
@@ -578,11 +597,7 @@ export function MatchCard({
 
           <Animated.View
             pointerEvents="none"
-            style={[
-              styles.stamp,
-              styles.stampRight,
-              { opacity: stampRightOpacity },
-            ]}
+            style={[styles.stamp, styles.stampRight, stampRightStyle]}
           >
             <BumpIcon size={40} color={BumpColors.mint} bumped animated={false} />
             <Text style={styles.stampText}>BUMP</Text>
