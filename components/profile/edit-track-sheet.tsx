@@ -2,7 +2,6 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import * as ImagePicker from 'expo-image-picker';
 import { useState, type ReactNode } from 'react';
 import {
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -12,13 +11,14 @@ import {
   Switch,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BumpColors } from '@/constants/bump-theme';
 import { TRACK_TYPES, type Track, type TrackType } from '@/constants/profile-data';
+import { useAppWidth } from '@/hooks/use-app-width';
+import { Alert } from '@/lib/alert';
 
 import { TrackCover } from './track-cover';
 import { TITLE_CLEARANCE } from './track-tile';
@@ -88,7 +88,7 @@ type FormProps = Omit<Props, 'visible' | 'sessionKey' | 'track'> & { track: Trac
 
 function EditTrackForm({ track, onClose, onSave, onDelete }: FormProps) {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const width = useAppWidth();
 
   const [coverUri, setCoverUri] = useState(track.coverUri);
   const [title, setTitle] = useState(track.title);

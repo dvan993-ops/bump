@@ -4,10 +4,8 @@ import { useState } from 'react';
 import {
   FlatList,
   Pressable,
-  Share,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +19,8 @@ import {
   type Track,
   type TrackFilter,
 } from '@/constants/profile-data';
+import { useAppWidth } from '@/hooks/use-app-width';
+import { shareOrCopy } from '@/lib/share';
 
 const COLORS = {
   black: BumpColors.charcoal,
@@ -58,7 +58,7 @@ function orderTracks(tracks: Track[]): Track[] {
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
+  const width = useAppWidth();
 
   const [tracks, setTracks] = useState<Track[]>(MOCK_TRACKS);
   const [filter, setFilter] = useState<TrackFilter>('all');
@@ -94,7 +94,7 @@ export default function ProfileScreen() {
   }
 
   function shareProfile() {
-    Share.share({
+    shareOrCopy({
       message: `Find ${PROFILE.name} (@${PROFILE.handle}) on Bump`,
     }).catch(() => {
       // Dismissing the share sheet isn't an error worth surfacing.

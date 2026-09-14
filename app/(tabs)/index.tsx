@@ -1,13 +1,11 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 
+import { AudioVisualizer } from "@/components/audio-visualizer";
 import { TAB_INDEX, useIsTabFocused } from "@/components/tab-focus";
 import { ThoughtsSheet, type Thought } from "@/components/thoughts-sheet";
-import {
-  BlurMask,
-  Canvas,
-  Group,
-  RoundedRect,
-} from "@shopify/react-native-skia";
+import { useAppWidth } from "@/hooks/use-app-width";
+import { Alert } from "@/lib/alert";
+import { shareOrCopy } from "@/lib/share";
 import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
@@ -19,20 +17,17 @@ import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ViewToken } from "react-native";
 import {
-  Alert,
   FlatList,
   Modal,
   PanResponder,
   Platform,
   Pressable,
-  Share,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-const TEST_BEAT = require("../../assets/audio/test-beat.wav");
+const TEST_BEAT = require("../../assets/audio/test-beat.m4a");
 /** Generous touch padding — these are one-handed, in-motion targets. */
 const TOUCH_SLOP = { top: 10, bottom: 10, left: 12, right: 12 };
 const WAVE_BAR_COUNT = 28;
@@ -353,71 +348,28 @@ type AudioWaveformProps = {
 };
 
 /**
- * Draws the glowing green audio visualizer with React Native Skia.
- * Each value in `bars` controls the height of one visualizer bar.
+ * Draws the glowing green audio visualizer. `AudioVisualizer` picks a Skia
+ * canvas on native and a plain-View rendition on web, since Skia doesn't
+ * render there. Each value in `bars` controls the height of one bar.
  */
 function AudioWaveform({ bars }: AudioWaveformProps) {
-  const { width: screenWidth } = useWindowDimensions();
+  const appWidth = useAppWidth();
 
-  const canvasWidth = screenWidth - 105;
+  const canvasWidth = appWidth - 105;
   const canvasHeight = 170;
-  const gap = 4;
-
-  const barWidth = (canvasWidth - gap * (bars.length - 1)) / bars.length;
 
   return (
-    <View pointerEvents="none" style={styles.skiaWaveformContainer}>
-      <Canvas
-        style={{
-          width: canvasWidth,
-          height: canvasHeight,
-        }}
-      >
-        {/* Blurred copy creates the green glow. */}
-        <Group opacity={0.55}>
-          <BlurMask blur={9} style="normal" />
-
-          {bars.map((barHeight, index) => {
-            const height = Math.max(
-              MIN_WAVE_HEIGHT,
-              Math.min(MAX_WAVE_HEIGHT, barHeight),
-            );
-
-            return (
-              <RoundedRect
-                key={`glow-${index}`}
-                x={index * (barWidth + gap)}
-                y={(canvasHeight - height) / 2}
-                width={barWidth}
-                height={height}
-                r={barWidth / 2}
-                color={COLORS.green}
-              />
-            );
-          })}
-        </Group>
-
-        {/* Sharp copy sits above the glow. */}
-        {bars.map((barHeight, index) => {
-          const height = Math.max(
-            MIN_WAVE_HEIGHT,
-            Math.min(MAX_WAVE_HEIGHT, barHeight),
-          );
-
-          return (
-            <RoundedRect
-              key={`bar-${index}`}
-              x={index * (barWidth + gap)}
-              y={(canvasHeight - height) / 2}
-              width={barWidth}
-              height={height}
-              r={barWidth / 2}
-              color={COLORS.green}
-            />
-          );
-        })}
-      </Canvas>
-    </View>
+    <AudioVisualizer
+      bars={bars}
+      width={canvasWidth}
+      height={canvasHeight}
+      color={COLORS.green}
+      gap={4}
+      minHeight={MIN_WAVE_HEIGHT}
+      maxHeight={MAX_WAVE_HEIGHT}
+      glowBlur={9}
+      style={styles.skiaWaveformContainer}
+    />
   );
 }
 
@@ -585,7 +537,7 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
   // Opens the phone's native share menu with a message for the current beat.
   const shareBeat = async () => {
     try {
-      await Share.share({
+      await shareOrCopy({
         message: `Listen to "${beat.title}" by @${beat.producer} on Bump.`,
       });
     } catch {
