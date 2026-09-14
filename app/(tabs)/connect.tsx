@@ -1,7 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useState } from "react";
 import {
-  Alert,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -10,6 +9,8 @@ import {
   TextInput,
   View,
 } from "react-native";
+
+import { Alert } from "@/lib/alert";
 
 const COLORS = {
   black: "#121212",

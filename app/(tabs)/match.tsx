@@ -18,10 +18,8 @@ import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ViewToken } from 'react-native';
 import {
-  Alert,
   FlatList,
   Pressable,
-  Share,
   StyleSheet,
   Text,
   View,
@@ -29,6 +27,8 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BumpIcon } from '@/components/bump-icon';
+import { Alert } from '@/lib/alert';
+import { shareOrCopy } from '@/lib/share';
 import { ArtistPreviewSheet } from '@/components/match/artist-preview-sheet';
 import {
   BumpMatchOverlay,
@@ -213,7 +213,7 @@ export default function MatchScreen() {
 
   const handleShare = useCallback(async (item: FeedItem) => {
     try {
-      await Share.share({
+      await shareOrCopy({
         message: `Check out "${item.post.title}" by @${item.artist.handle} on Bump.`,
       });
     } catch {

@@ -22,7 +22,6 @@ import {
   Pressable,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -43,10 +42,11 @@ import { BumpIcon } from '@/components/bump-icon';
 import { ArtistAvatar } from '@/components/match/artist-avatar';
 import { BumpColors, formatCount } from '@/constants/bump-theme';
 import type { MatchPost } from '@/constants/match-data';
+import { useAppWidth } from '@/hooks/use-app-width';
 import { useAudioBars } from '@/hooks/use-audio-bars';
 import type { FeedItem } from '@/lib/match-discovery';
 
-const PREVIEW_SOURCE = require('../../assets/audio/test-beat.wav');
+const PREVIEW_SOURCE = require('../../assets/audio/test-beat.m4a');
 
 /** Fraction of the screen width a drag must cross to count as a bump. */
 const SWIPE_FRACTION = 0.17;
@@ -109,7 +109,7 @@ export function MatchCard({
   onRespondToCollab,
   onShare,
 }: MatchCardProps) {
-  const { width } = useWindowDimensions();
+  const width = useAppWidth();
   const insets = useSafeAreaInsets();
   const { artist } = item;
 
