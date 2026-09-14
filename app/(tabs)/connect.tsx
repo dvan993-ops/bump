@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 
+import { StudioGlow } from "@/components/studio-glow";
 import { Alert } from "@/lib/alert";
 
 const COLORS = {
@@ -122,6 +123,8 @@ export default function ConnectScreen() {
 
   return (
     <SafeAreaView style={styles.screen}>
+      <StudioGlow />
+
       <View style={styles.header}>
         <Text style={styles.heading}>Connect</Text>
         <Pressable
@@ -332,7 +335,7 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: COLORS.black,
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
     paddingTop: 20,
   },
 

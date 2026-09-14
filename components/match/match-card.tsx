@@ -40,6 +40,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AudioVisualizer } from '@/components/audio-visualizer';
 import { BumpIcon } from '@/components/bump-icon';
 import { ArtistAvatar } from '@/components/match/artist-avatar';
+import { StudioGlow } from '@/components/studio-glow';
 import { BumpColors, formatCount } from '@/constants/bump-theme';
 import type { MatchPost } from '@/constants/match-data';
 import { useAppWidth } from '@/hooks/use-app-width';
@@ -321,7 +322,7 @@ export function MatchCard({
 
   const isCollab = item.kind === 'collab' && Boolean(post.openCollabAsk);
   const waveWidth = Math.max(80, width - 122);
-  const accent = isCollab ? BumpColors.mint : BumpColors.green;
+  const accent = BumpColors.mint;
 
   // Role and genres only. Location gets its own chip below, because the three
   // of them on one line truncate on a narrow phone.
@@ -342,6 +343,8 @@ export function MatchCard({
           onPress={() => setPaused((current) => !current)}
           style={styles.background}
         >
+          <StudioGlow />
+
           <AudioVisualizer
             bars={bars}
             width={waveWidth}
@@ -821,7 +824,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 999,
-    backgroundColor: BumpColors.green,
+    backgroundColor: BumpColors.mint,
   },
 
   followingButton: {

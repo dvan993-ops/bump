@@ -50,8 +50,20 @@ export function useAudioBars(
   const receivingRef = useRef(false);
   const lastUpdate = useRef(0);
 
+  // `useAudioSampleListener` subscribes once per player and never
+  // re-subscribes, so the callback it's given keeps whatever closure it had
+  // on that first render forever — including a stale `active`. A card that
+  // isn't the initially-focused tab's first card mounts with `active: false`
+  // and would stay silently stuck there even after becoming active. Reading
+  // through a ref side-steps that: the ref is always current, regardless of
+  // when the subscription was set up.
+  const optionsRef = useRef({ active, barCount, minHeight, maxHeight });
+  optionsRef.current = { active, barCount, minHeight, maxHeight };
+
   useAudioSampleListener(player, (sample) => {
-    if (!active) {
+    const options = optionsRef.current;
+
+    if (!options.active) {
       return;
     }
 
@@ -74,12 +86,13 @@ export function useAudioBars(
       setReceiving(true);
     }
 
-    const framesPerBar = Math.max(1, Math.floor(frames.length / barCount));
+    const { barCount: count, minHeight: floor, maxHeight: ceiling } = options;
+    const framesPerBar = Math.max(1, Math.floor(frames.length / count));
 
-    const nextBars = Array.from({ length: barCount }, (_, barIndex) => {
+    const nextBars = Array.from({ length: count }, (_, barIndex) => {
       const start = barIndex * framesPerBar;
       const end =
-        barIndex === barCount - 1
+        barIndex === count - 1
           ? frames.length
           : Math.min(start + framesPerBar, frames.length);
 
@@ -103,14 +116,14 @@ export function useAudioBars(
       // A stronger curve leaves more room for visible differences.
       const shaped = Math.pow(normalized, 1.5);
 
-      return minHeight + shaped * (maxHeight - minHeight);
+      return floor + shaped * (ceiling - floor);
     });
 
     // Smooth movement without letting the bars sit permanently full.
     setBars((previous) =>
       nextBars.map(
         (nextHeight, index) =>
-          (previous[index] ?? minHeight) * 0.65 + nextHeight * 0.35,
+          (previous[index] ?? floor) * 0.65 + nextHeight * 0.35,
       ),
     );
   });

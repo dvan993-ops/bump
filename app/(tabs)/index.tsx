@@ -1,9 +1,15 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 
 import { AudioVisualizer } from "@/components/audio-visualizer";
+import { StudioGlow } from "@/components/studio-glow";
 import { TAB_INDEX, useIsTabFocused } from "@/components/tab-focus";
 import { ThoughtsSheet, type Thought } from "@/components/thoughts-sheet";
 import { useAppWidth } from "@/hooks/use-app-width";
+import {
+  MAX_WAVE_HEIGHT,
+  MIN_WAVE_HEIGHT,
+  useAudioBars,
+} from "@/hooks/use-audio-bars";
 import { Alert } from "@/lib/alert";
 import { shareOrCopy } from "@/lib/share";
 import {
@@ -11,7 +17,6 @@ import {
   setAudioModeAsync,
   useAudioPlayer,
   useAudioPlayerStatus,
-  useAudioSampleListener,
 } from "expo-audio";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -30,9 +35,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 const TEST_BEAT = require("../../assets/audio/test-beat.m4a");
 /** Generous touch padding — these are one-handed, in-motion targets. */
 const TOUCH_SLOP = { top: 10, bottom: 10, left: 12, right: 12 };
-const WAVE_BAR_COUNT = 28;
-const MIN_WAVE_HEIGHT = 8;
-const MAX_WAVE_HEIGHT = 130;
 type FeedTab = "forYou" | "following";
 type SortMode = "Recommended" | "Trending" | "Recent";
 
@@ -59,8 +61,8 @@ const COLORS = {
   charcoal: "#121212",
   surface: "#1A1A1A",
   raised: "#242424",
-  green: "#1DB954",
-  greenPressed: "#169C46",
+  green: "#6FFFB7",
+  greenPressed: "#4FE49B",
   white: "#FFFFFF",
   grey: "#B3B3B3",
   muted: "#777777",
@@ -355,7 +357,7 @@ type AudioWaveformProps = {
 function AudioWaveform({ bars }: AudioWaveformProps) {
   const appWidth = useAppWidth();
 
-  const canvasWidth = appWidth - 105;
+  const canvasWidth = appWidth - 40;
   const canvasHeight = 170;
 
   return (
@@ -387,7 +389,6 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
   const [following, setFollowing] = useState(beat.followed);
   const [paused, setPaused] = useState(false);
   const [userRating, setUserRating] = useState(0);
-  const [hasReceivedSamples, setHasReceivedSamples] = useState(false);
   const [thoughts, setThoughts] = useState<Thought[]>(
     () => MOCK_THOUGHTS[beat.id] ?? [],
   );
@@ -412,85 +413,11 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
   });
 
   const audioStatus = useAudioPlayerStatus(player);
-
-  const [waveBars, setWaveBars] = useState<number[]>(
-    Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT),
-  );
-
-  const hasReceivedSamplesRef = useRef(false);
-
-  const lastWaveUpdate = useRef(0);
-
-  // Receives live PCM audio samples from the player and converts their loudness into bar heights.
-  useAudioSampleListener(player, (sample) => {
-    if (!active) {
-      return;
-    }
-
-    const frames = sample.channels[0]?.frames;
-
-    if (!frames || frames.length === 0) {
-      return;
-    }
-
-    // Limit rendering work to roughly 20 updates per second.
-    const now = Date.now();
-
-    if (now - lastWaveUpdate.current < 50) {
-      return;
-    }
-
-    lastWaveUpdate.current = now;
-
-    if (!hasReceivedSamplesRef.current) {
-      hasReceivedSamplesRef.current = true;
-      setHasReceivedSamples(true);
-    }
-
-    const framesPerBar = Math.max(
-      1,
-      Math.floor(frames.length / WAVE_BAR_COUNT),
-    );
-
-    const nextBars = Array.from({ length: WAVE_BAR_COUNT }, (_, barIndex) => {
-      const start = barIndex * framesPerBar;
-      const end =
-        barIndex === WAVE_BAR_COUNT - 1
-          ? frames.length
-          : Math.min(start + framesPerBar, frames.length);
-
-      let sumOfSquares = 0;
-      let frameCount = 0;
-
-      for (let frameIndex = start; frameIndex < end; frameIndex += 1) {
-        const frame = frames[frameIndex] ?? 0;
-
-        sumOfSquares += frame * frame;
-        frameCount += 1;
-      }
-
-      const rms = Math.sqrt(sumOfSquares / Math.max(frameCount, 1));
-
-      // Convert loudness to decibels. This prevents loud tracks from
-      // immediately forcing every bar to the maximum height.
-      const decibels = 20 * Math.log10(rms + 0.000001);
-      const normalized = Math.max(0, Math.min(1, (decibels + 55) / 52));
-
-      // A stronger curve leaves more room for visible differences.
-      const shapedLevel = Math.pow(normalized, 1.5);
-
-      return (
-        MIN_WAVE_HEIGHT + shapedLevel * (MAX_WAVE_HEIGHT - MIN_WAVE_HEIGHT)
-      );
-    });
-
-    // Smooth the movement without allowing the bars to remain permanently full.
-    setWaveBars((previousBars) =>
-      nextBars.map(
-        (nextHeight, index) => previousBars[index] * 0.65 + nextHeight * 0.35,
-      ),
-    );
-  });
+  const {
+    bars: waveBars,
+    receiving: hasReceivedSamples,
+    supported: samplingSupported,
+  } = useAudioBars(player, { active });
 
   // Configures the audio player to loop the preview and play at full volume.
   useEffect(() => {
@@ -502,7 +429,7 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
     player.volume = 1;
   }, [player]);
 
-  // Starts the active card, pauses inactive cards, and resets cards when the user scrolls away.
+  // Starts the active card, pauses inactive cards, and rewinds cards when the user scrolls away.
   useEffect(() => {
     if (active && !paused) {
       player.play();
@@ -512,12 +439,6 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
 
     if (!active) {
       void player.seekTo(0);
-      // Resets the visualizer for the card the user scrolled away from, so
-      // it isn't left showing stale bars the next time it becomes active.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setWaveBars(Array(WAVE_BAR_COUNT).fill(MIN_WAVE_HEIGHT));
-      hasReceivedSamplesRef.current = false;
-      setHasReceivedSamples(false);
     }
   }, [active, paused, player]);
 
@@ -553,10 +474,12 @@ function BeatCard({ beat, height, active }: BeatCardProps) {
         onPress={() => setPaused((current) => !current)}
         style={styles.beatBackground}
       >
+        <StudioGlow />
+
         <AudioWaveform bars={waveBars} />
 
         <Text style={styles.samplingStatus}>
-          {!player.isAudioSamplingSupported
+          {!samplingSupported
             ? "SAMPLING UNSUPPORTED"
             : hasReceivedSamples
               ? "LIVE AUDIO"
@@ -1104,8 +1027,8 @@ const styles = StyleSheet.create({
 
   skiaWaveformContainer: {
     position: "absolute",
-    left: 22,
-    right: 78,
+    left: 20,
+    right: 20,
     top: "27%",
     height: 170,
     zIndex: 1,
@@ -1308,8 +1231,8 @@ const styles = StyleSheet.create({
   },
   beatDetails: {
     position: "absolute",
-    left: 15,
-    right: 82,
+    left: 20,
+    right: 20,
     // Clears the rating panel below it: that panel sits 14px off the bottom and
     // stands roughly 91px tall, so anything under ~110 puts the progress bar
     // behind it.
@@ -1367,9 +1290,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 12,
-    backgroundColor: "rgba(29,185,84,0.22)",
+    backgroundColor: "rgba(111,255,183,0.22)",
     borderWidth: 1,
-    borderColor: "rgba(29,185,84,0.55)",
+    borderColor: "rgba(111,255,183,0.55)",
   },
   genrePillText: {
     color: COLORS.green,
@@ -1411,8 +1334,8 @@ const styles = StyleSheet.create({
   },
   ratingSection: {
     position: "absolute",
-    left: 14,
-    right: 78,
+    left: 20,
+    right: 20,
     bottom: 14,
     zIndex: 8,
     paddingHorizontal: 13,

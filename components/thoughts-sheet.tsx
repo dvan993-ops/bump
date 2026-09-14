@@ -17,7 +17,7 @@ const COLORS = {
   charcoal: "#121212",
   surface: "#1A1A1A",
   raised: "#242424",
-  green: "#1DB954",
+  green: "#6FFFB7",
   white: "#FFFFFF",
   grey: "#B3B3B3",
   muted: "#777777",

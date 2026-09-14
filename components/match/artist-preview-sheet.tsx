@@ -382,13 +382,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
-    backgroundColor: BumpColors.greenWash,
+    backgroundColor: BumpColors.mintWash,
     borderWidth: 1,
-    borderColor: BumpColors.greenEdge,
+    borderColor: BumpColors.mintEdge,
   },
 
   genrePillText: {
-    color: BumpColors.green,
+    color: BumpColors.mint,
     fontSize: 11,
     fontWeight: '800',
   },
