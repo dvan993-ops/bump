@@ -1,5 +1,6 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useState } from 'react';
 import {
   FlatList,
@@ -11,6 +12,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { EditTrackSheet } from '@/components/profile/edit-track-sheet';
+import { RANKS, RankBadge } from '@/components/profile/rank-badge';
 import { TrackTile } from '@/components/profile/track-tile';
 import { BumpColors } from '@/constants/bump-theme';
 import {
@@ -32,6 +34,8 @@ const COLORS = {
   muted: BumpColors.muted,
 };
 
+const PROFILE_BANNER = require('@/assets/images/profile-banner.png');
+
 /** Gutter between grid tiles. */
 const GAP = 2;
 const COLUMNS = 3;
@@ -39,12 +43,22 @@ const COLUMNS = 3;
 const PROFILE = {
   name: 'Sam Rivers',
   handle: 'samrivers',
-  role: 'Producer • Auckland, NZ',
+  role: 'Producer',
+  location: 'Auckland, NZ',
   bio: 'Making beats since 2019. Into lo-fi, boom bap and anything with a dusty sample. Always looking for vocalists to collab with.',
   genres: ['Hip-Hop', 'Lo-Fi', 'R&B', 'Boom Bap'],
   matches: 18,
   followers: 212,
+  avgRating: 4.7,
+  level: 24,
+  rank: 'Elite',
+  xp: 2140,
+  xpToNext: 3000,
 };
+
+const rankIndex = RANKS.indexOf(PROFILE.rank as (typeof RANKS)[number]);
+const nextRank = RANKS[rankIndex + 1] ?? RANKS[rankIndex];
+const xpProgress = Math.min(1, PROFILE.xp / PROFILE.xpToNext);
 
 /** Pinned first, then newest first. */
 function orderTracks(tracks: Track[]): Track[] {
@@ -103,25 +117,59 @@ export default function ProfileScreen() {
 
   const header = (
     <View>
-      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
-        <View style={styles.topBarSide} />
-        <Text style={styles.topBarName} numberOfLines={1}>
-          {PROFILE.name}
-        </Text>
-        <View style={[styles.topBarSide, styles.topBarRight]}>
-          <Pressable hitSlop={10} accessibilityRole="button" accessibilityLabel="Settings">
-            <Ionicons name="settings-outline" size={24} color={COLORS.white} />
-          </Pressable>
-        </View>
+      <View style={styles.banner}>
+        <Image source={PROFILE_BANNER} style={styles.bannerImage} contentFit="cover" />
+        <LinearGradient
+          colors={['transparent', COLORS.black]}
+          style={styles.bannerFade}
+        />
+        <Pressable
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Settings"
+          style={[styles.settingsButton, { top: insets.top + 8 }]}
+        >
+          <Ionicons name="settings-outline" size={18} color={COLORS.white} />
+        </Pressable>
       </View>
 
       <View style={styles.identity}>
-        <Image
-          source={require('@/assets/images/RobloxScreenShot20260624_233539891.png')}
-          style={styles.avatar}
-          contentFit="cover"
-        />
+        <View style={styles.avatarWrap}>
+          <LinearGradient
+            colors={[BumpColors.mint, '#4F8CFF']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.avatarRing}
+          />
+          <Image
+            source={require('@/assets/images/RobloxScreenShot20260624_233539891.png')}
+            style={styles.avatar}
+            contentFit="cover"
+          />
+          <View style={styles.levelBadge}>
+            <Text style={styles.levelBadgeText}>LVL {PROFILE.level}</Text>
+          </View>
+        </View>
+
+        <Text style={styles.name}>{PROFILE.name}</Text>
         <Text style={styles.handle}>@{PROFILE.handle}</Text>
+
+        <View style={styles.rankBadgeWrap}>
+          <RankBadge label={PROFILE.rank} />
+        </View>
+
+        <View style={styles.xpBlock}>
+          <View style={styles.xpLabels}>
+            <Text style={styles.xpEdgeLabel}>{PROFILE.rank}</Text>
+            <Text style={styles.xpValue}>
+              {PROFILE.xp.toLocaleString()} / {PROFILE.xpToNext.toLocaleString()} XP
+            </Text>
+            <Text style={styles.xpEdgeLabel}>{nextRank}</Text>
+          </View>
+          <View style={styles.xpTrack}>
+            <View style={[styles.xpFill, { width: `${xpProgress * 100}%` }]} />
+          </View>
+        </View>
 
         <View style={styles.statsRow}>
           <Stat value={tracks.length} label="Uploads" />
@@ -129,18 +177,30 @@ export default function ProfileScreen() {
           <Stat value={PROFILE.followers} label="Followers" />
         </View>
 
+        <View style={styles.factsRow}>
+          <View style={styles.ratingFact}>
+            <Ionicons name="star" size={14} color={BumpColors.mint} />
+            <Text style={styles.ratingFactText}>{PROFILE.avgRating} avg rating</Text>
+          </View>
+          <View style={styles.locationFact}>
+            <Ionicons name="location-outline" size={14} color={COLORS.grey} />
+            <Text style={styles.locationFactText}>{PROFILE.location}</Text>
+          </View>
+        </View>
+
         <View style={styles.actionsRow}>
           <Pressable
             style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
             accessibilityRole="button"
           >
-            <Text style={styles.actionText}>Edit profile</Text>
+            <Text style={styles.actionTextPrimary}>Edit profile</Text>
           </Pressable>
           <Pressable
             onPress={shareProfile}
-            style={({ pressed }) => [styles.actionButton, pressed && styles.pressed]}
+            style={({ pressed }) => [styles.actionButtonOutline, pressed && styles.pressed]}
             accessibilityRole="button"
           >
+            <Ionicons name="share-outline" size={14} color={COLORS.white} />
             <Text style={styles.actionText}>Share profile</Text>
           </Pressable>
         </View>
@@ -250,47 +310,128 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
 
-  topBar: {
-    flexDirection: 'row',
+  banner: {
+    height: 112,
+    width: '100%',
+  },
+
+  bannerImage: {
+    ...StyleSheet.absoluteFill,
+  },
+
+  bannerFade: {
+    ...StyleSheet.absoluteFill,
+  },
+
+  settingsButton: {
+    position: 'absolute',
+    right: 16,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-
-  topBarSide: {
-    width: 40,
-  },
-
-  topBarRight: {
-    alignItems: 'flex-end',
-  },
-
-  topBarName: {
-    flex: 1,
-    color: COLORS.white,
-    fontSize: 17,
-    fontWeight: '700',
-    textAlign: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.4)',
   },
 
   identity: {
     alignItems: 'center',
     paddingHorizontal: 24,
-    paddingTop: 12,
+    marginTop: -48,
+  },
+
+  avatarWrap: {
+    width: 96,
+    height: 96,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  avatarRing: {
+    ...StyleSheet.absoluteFill,
+    borderRadius: 52,
+    margin: -4,
   },
 
   avatar: {
     width: 96,
     height: 96,
     borderRadius: 48,
+    borderWidth: 2,
+    borderColor: COLORS.black,
     backgroundColor: COLORS.surface,
   },
 
-  handle: {
+  levelBadge: {
+    position: 'absolute',
+    bottom: -6,
+    alignSelf: 'center',
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: COLORS.black,
+    backgroundColor: BumpColors.mint,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+
+  levelBadgeText: {
+    color: COLORS.black,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+
+  name: {
     color: COLORS.white,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 20,
+    fontWeight: '800',
+    marginTop: 14,
+  },
+
+  handle: {
+    color: COLORS.grey,
+    fontSize: 14,
+    marginTop: 2,
+  },
+
+  rankBadgeWrap: {
+    marginTop: 8,
+  },
+
+  xpBlock: {
+    width: '100%',
+    maxWidth: 280,
     marginTop: 12,
+  },
+
+  xpLabels: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+
+  xpEdgeLabel: {
+    color: COLORS.grey,
+    fontSize: 11,
+  },
+
+  xpValue: {
+    color: BumpColors.mint,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  xpTrack: {
+    height: 6,
+    borderRadius: 3,
+    marginTop: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    overflow: 'hidden',
+  },
+
+  xpFill: {
+    height: '100%',
+    borderRadius: 3,
+    backgroundColor: BumpColors.mint,
   },
 
   statsRow: {
@@ -317,15 +458,76 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
+  factsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+    width: '100%',
+  },
+
+  ratingFact: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: BumpColors.mintEdge,
+    backgroundColor: BumpColors.mintWash,
+    paddingVertical: 9,
+  },
+
+  ratingFactText: {
+    color: BumpColors.mint,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+
+  locationFact: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
+    paddingVertical: 9,
+  },
+
+  locationFactText: {
+    color: COLORS.grey,
+    fontSize: 13,
+  },
+
   actionsRow: {
     flexDirection: 'row',
     gap: 8,
-    marginTop: 18,
+    marginTop: 12,
   },
 
   actionButton: {
-    backgroundColor: COLORS.raised,
-    borderRadius: 6,
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: BumpColors.mint,
+    borderRadius: 999,
+    paddingVertical: 10,
+    paddingHorizontal: 22,
+  },
+
+  actionButtonOutline: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    backgroundColor: COLORS.surface,
     paddingVertical: 10,
     paddingHorizontal: 22,
   },
@@ -334,6 +536,12 @@ const styles = StyleSheet.create({
     color: COLORS.white,
     fontSize: 15,
     fontWeight: '600',
+  },
+
+  actionTextPrimary: {
+    color: COLORS.black,
+    fontSize: 15,
+    fontWeight: '700',
   },
 
   role: {
@@ -405,7 +613,7 @@ const styles = StyleSheet.create({
   },
 
   filterIndicatorActive: {
-    backgroundColor: COLORS.white,
+    backgroundColor: BumpColors.mint,
   },
 
   gridRow: {

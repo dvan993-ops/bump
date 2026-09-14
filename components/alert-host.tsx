@@ -94,7 +94,7 @@ const styles = StyleSheet.create({
   },
 
   buttonText: {
-    color: BumpColors.green,
+    color: BumpColors.mint,
     fontSize: 15,
     fontWeight: '600',
   },

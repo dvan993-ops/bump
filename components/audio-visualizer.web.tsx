@@ -30,7 +30,7 @@ export function AudioVisualizer({
   bars,
   width,
   height,
-  color = BumpColors.green,
+  color = BumpColors.mint,
   gap = 4,
   minHeight = MIN_WAVE_HEIGHT,
   maxHeight = MAX_WAVE_HEIGHT,

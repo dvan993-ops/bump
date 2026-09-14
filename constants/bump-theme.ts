@@ -1,12 +1,9 @@
 /**
  * Shared visual tokens for Bump.
  *
- * Two greens, used deliberately:
- * - `green` is the feed green. It is the colour of the audio visualiser and of
- *   anything to do with listening, so Match looks like the same app as Home.
- * - `mint` is the Bump green. It is reserved for the dap action and for match
- *   moments, so the one interaction that matters most has a colour nothing else
- *   is allowed to borrow.
+ * `mint` is the one brand accent — teal/cyan rather than Spotify's green — used
+ * everywhere from the audio visualiser to the dap action to match moments, so
+ * the whole app reads as one consistent colour.
  */
 export const BumpColors = {
   black: '#000000',
@@ -20,11 +17,6 @@ export const BumpColors = {
   grey: '#A7A7A7',
   muted: '#777777',
   dim: 'rgba(255,255,255,0.66)',
-
-  green: '#1DB954',
-  greenPressed: '#169C46',
-  greenWash: 'rgba(29,185,84,0.22)',
-  greenEdge: 'rgba(29,185,84,0.55)',
 
   mint: '#6FFFB7',
   mintPressed: '#4FE49B',
